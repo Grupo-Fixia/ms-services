@@ -1,0 +1,274 @@
+openapi: 3.0.3
+info:
+  title: ms-services
+  version: 0.0.1
+  description: |
+    Solicitudes de servicio del cliente: publicar una solicitud y consultar las propias (GC-296 / GC-333).
+
+    Los errores usan RFC 7807 (`application/problem+json`). Todas las respuestas 401 son idénticas
+    (cabecera `WWW-Authenticate: Bearer` y el mismo cuerpo) para no revelar el motivo del rechazo.
+
+    Rutas: Traefik enruta `/api/services` sin quitar el prefijo, por eso las rutas incluyen `/api/services`.
+
+    Autenticación: los tokens los emite ms-users (RS256). Este servicio verifica la firma con la clave pública
+    y, en cada petición, consulta a ms-users si el token fue revocado por un cierre de sesión. Si ms-users no
+    responde, la petición se rechaza con 401 (el servicio falla cerrado).
+
+    Privacidad: la dirección exacta se guarda pero no se devuelve mientras la solicitud no esté
+    `CONTRACTED`. La ubicación aproximada devuelve las coordenadas redondeadas a dos decimales (~1 km).
+servers:
+  - url: http://localhost
+    description: Traefik (docker compose)
+  - url: http://localhost:8080
+    description: Servicio directo
+
+paths:
+  /api/services/requests:
+    post:
+      summary: Publicar una solicitud de servicio (GC-333)
+      description: |
+        Crea una solicitud en estado `PUBLISHED` para el cliente autenticado. El cliente sale del token:
+        un `clientId` en el cuerpo se ignora. Solo rol `ROLE_CLIENT`.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateServiceRequest'
+      responses:
+        '201':
+          description: Solicitud publicada.
+          headers:
+            Location:
+              schema:
+                type: string
+                example: http://localhost/api/services/requests/6f1c1d52-8d0a-4d6e-b7f3-0f6a2f5d8c11
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceRequest'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    get:
+      summary: Listar mis solicitudes (GC-333)
+      description: Solicitudes del cliente autenticado, la más reciente primero. Sin paginación en esta versión.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Solicitudes del cliente (puede venir vacía).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ServiceRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/services/requests/{id}:
+    get:
+      summary: Consultar una de mis solicitudes (GC-333)
+      description: |
+        Devuelve la solicitud si es del cliente autenticado. Si no existe, es de otro cliente o el
+        identificador no es un UUID, la respuesta es la misma 404: no permite averiguar qué solicitudes existen.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Solicitud del cliente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        Access token RS256 emitido por ms-users. Claims: `iss`, `sub` (`usr_<uuid>`), `aud`, `iat`, `exp`,
+        `jti` y `roles` (por ejemplo `["ROLE_CLIENT"]`).
+
+  responses:
+    Unauthorized:
+      description: |
+        Sin token, token inválido, expirado, firmado con otra clave, revocado por logout, o revocación que no
+        se pudo comprobar. No se indica el motivo.
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+            example: Bearer
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: No autenticado
+            status: 401
+            detail: Se requiere autenticación válida
+            instance: /api/services/requests
+    Forbidden:
+      description: Sesión válida, pero el rol no permite la acción (por ejemplo, un técnico en una ruta de cliente).
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Acceso denegado
+            status: 403
+            detail: Su rol no permite realizar esta acción
+            instance: /api/services/requests
+    NotFound:
+      description: La solicitud no existe o no pertenece al cliente autenticado.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Solicitud no encontrada
+            status: 404
+            detail: No existe la solicitud indicada
+    ValidationError:
+      description: Datos inválidos o faltantes; `errors` indica qué corregir.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ValidationProblem'
+          example:
+            type: about:blank
+            title: Datos inválidos
+            status: 400
+            detail: Hay datos que debe corregir
+            errors:
+              - { field: category, message: La categoría es obligatoria }
+              - { field: description, message: La descripción es obligatoria }
+
+  schemas:
+    ServiceCategory:
+      type: string
+      enum: [PLUMBING, ELECTRICAL, MAINTENANCE, LOCKSMITHING, PAINTING, CARPENTRY]
+
+    ServiceRequestStatus:
+      type: string
+      enum: [PUBLISHED, PROVIDER_SELECTED, CONTRACTED, CANCELLED, EXPIRED]
+      description: |
+        `PUBLISHED` → `PROVIDER_SELECTED` | `CANCELLED` | `EXPIRED`; `PROVIDER_SELECTED` → `CONTRACTED` | `CANCELLED`.
+        `CONTRACTED`, `CANCELLED` y `EXPIRED` son terminales.
+
+    CreateServiceRequest:
+      type: object
+      required: [category, description, approximateLocation, expectedAt]
+      properties:
+        category: { $ref: '#/components/schemas/ServiceCategory' }
+        description: { type: string, maxLength: 2000, example: Fuga de agua en el baño }
+        approximateLocation:
+          type: object
+          required: [city, zone]
+          properties:
+            city: { type: string, maxLength: 100, example: Bogotá }
+            zone: { type: string, maxLength: 100, example: Chapinero }
+            latitude: { type: number, format: double, minimum: -90, maximum: 90, example: 4.6533 }
+            longitude: { type: number, format: double, minimum: -180, maximum: 180, example: -74.0836 }
+          description: Latitud y longitud, si se envían, deben ir juntas. Se redondean a dos decimales.
+        exactLocation:
+          type: object
+          required: [address]
+          description: Opcional. Se guarda protegida y no se devuelve hasta que la solicitud esté `CONTRACTED`.
+          properties:
+            address: { type: string, maxLength: 255, example: 'Calle 10 # 5-20, apto 301' }
+            latitude: { type: number, format: double, minimum: -90, maximum: 90 }
+            longitude: { type: number, format: double, minimum: -180, maximum: 180 }
+        expectedAt:
+          type: string
+          format: date-time
+          description: Momento esperado del servicio; debe ser posterior a la publicación.
+          example: '2026-10-20T15:00:00Z'
+        photoKeys:
+          type: array
+          maxItems: 5
+          description: |
+            Claves de las fotografías ya subidas al almacenamiento (la subida no es parte de esta API).
+            Solo letras, números, `.`, `_`, `-` y `/`; no se admite `..`.
+          items: { type: string, maxLength: 255, example: requests/2026/10/fuga-1.jpg }
+
+    ServiceRequest:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        category: { $ref: '#/components/schemas/ServiceCategory' }
+        description: { type: string }
+        status: { $ref: '#/components/schemas/ServiceRequestStatus' }
+        approximateLocation:
+          type: object
+          properties:
+            city: { type: string }
+            zone: { type: string }
+            latitude: { type: number, format: double, nullable: true }
+            longitude: { type: number, format: double, nullable: true }
+        exactLocation:
+          type: object
+          description: Solo presente cuando la solicitud está `CONTRACTED` y el cliente indicó una dirección.
+          properties:
+            address: { type: string }
+            latitude: { type: number, format: double, nullable: true }
+            longitude: { type: number, format: double, nullable: true }
+        expectedAt: { type: string, format: date-time }
+        photoKeys:
+          type: array
+          items: { type: string }
+        selectedProviderId:
+          type: string
+          format: uuid
+          description: Solo presente desde `PROVIDER_SELECTED`.
+        publishedAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    Problem:
+      type: object
+      properties:
+        type: { type: string, example: 'about:blank' }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+
+    ValidationProblem:
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          properties:
+            errors:
+              type: array
+              items:
+                type: object
+                properties:
+                  field: { type: string, example: approximateLocation.city }
+                  message: { type: string }
