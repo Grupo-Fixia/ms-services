@@ -4,3 +4,7 @@ spring:
     username: sa
     password: ""
     driver-class-name: org.h2.Driver
+
+fixia:
+  users:
+    internal-api-key: clave-interna-de-prueba

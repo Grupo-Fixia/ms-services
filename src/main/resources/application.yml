@@ -21,6 +21,19 @@ spring:
     enabled: true
     locations: classpath:db/migration
 
+fixia:
+  jwt:
+    issuer: ${JWT_ISSUER:https://auth.fixia.com}
+    audience: ${JWT_AUDIENCE:https://api.fixia.com}
+    # PEM X.509 de la clave pública de ms-users. Obligatoria fuera de los perfiles local y test.
+    public-key: ${JWT_PUBLIC_KEY:}
+  users:
+    # ms-users guarda la lista de tokens revocados: se le consulta en cada petición autenticada.
+    base-url: ${USERS_BASE_URL:http://ms-users:8080}
+    internal-api-key: ${INTERNAL_API_KEY:}
+    connect-timeout: ${USERS_CONNECT_TIMEOUT:1s}
+    read-timeout: ${USERS_READ_TIMEOUT:2s}
+
 management:
   endpoints:
     web:
