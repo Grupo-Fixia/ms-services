@@ -4,6 +4,7 @@ info:
   version: 0.0.1
   description: |
     Solicitudes de servicio del cliente: publicar una solicitud y consultar las propias (GC-296 / GC-333).
+    Postulaciones del técnico a solicitudes disponibles para las que es elegible (GC-298 / GC-342).
 
     Los errores usan RFC 7807 (`application/problem+json`). Todas las respuestas 401 son idénticas
     (cabecera `WWW-Authenticate: Bearer` y el mismo cuerpo) para no revelar el motivo del rechazo.
@@ -96,6 +97,101 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ServiceRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/services/applications:
+    post:
+      summary: Postularse a una solicitud disponible (GC-342)
+      description: |
+        Solo técnicos (`ROLE_PROFESSIONAL`). El técnico sale del token. La solicitud debe estar `PUBLISHED` y con el
+        momento esperado por delante. La elegibilidad (categoría, zona de atención y disponibilidad) la decide
+        ms-users; si ms-users no responde, la postulación no se registra (503). La respuesta solo incluye la
+        ubicación aproximada de la solicitud.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateApplication'
+      responses:
+        '201':
+          description: Postulación registrada en estado APPLIED. La cabecera `Location` apunta a la postulación.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Application'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: La solicitud ya no recibe postulaciones (no está publicada o su fecha esperada pasó).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: El técnico no es elegible. `reasons` dice por qué (CATEGORY, ZONE, AVAILABILITY, ...).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/NotEligibleProblem'
+        '503':
+          description: No se pudo verificar la elegibilidad con ms-users; la postulación no se registró.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    get:
+      summary: Listar mis postulaciones (GC-342)
+      description: Postulaciones del técnico autenticado, la más reciente primero.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Postulaciones del técnico.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Application'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/services/applications/{id}:
+    get:
+      summary: Consultar una de mis postulaciones (GC-342)
+      description: Si no existe o es de otro técnico, la respuesta es la misma 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Postulación del técnico.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Application'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -250,6 +346,45 @@ components:
           description: Solo presente desde `PROVIDER_SELECTED`.
         publishedAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+
+    ApplicationStatus:
+      type: string
+      enum: [APPLIED, SELECTED, REJECTED]
+
+    CreateApplication:
+      type: object
+      required: [serviceRequestId]
+      properties:
+        serviceRequestId: { type: string, format: uuid }
+
+    Application:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/ApplicationStatus' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+        serviceRequest:
+          type: object
+          description: Resumen de la solicitud, solo con la ubicación aproximada.
+          properties:
+            id: { type: string, format: uuid }
+            category: { $ref: '#/components/schemas/ServiceCategory' }
+            status: { $ref: '#/components/schemas/ServiceRequestStatus' }
+            city: { type: string }
+            zone: { type: string }
+            latitude: { type: number, nullable: true }
+            longitude: { type: number, nullable: true }
+            expectedAt: { type: string, format: date-time }
+
+    NotEligibleProblem:
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+        - type: object
+          properties:
+            reasons:
+              type: array
+              items: { type: string, example: ZONE }
 
     Problem:
       type: object

@@ -46,6 +46,25 @@ Contrato completo en [`docs/openapi.yaml`](docs/openapi.yaml).
 El cliente sale siempre del token, nunca del cuerpo ni de la ruta. La dirección exacta se guarda pero no se
 devuelve hasta que la solicitud está `CONTRACTED`.
 
+## Postulaciones (GC-342)
+
+| Método y ruta | Descripción |
+|---|---|
+| `POST /api/services/applications` | El técnico se postula a una solicitud (201 + `Location`) |
+| `GET /api/services/applications` | Mis postulaciones, la más reciente primero |
+| `GET /api/services/applications/{id}` | Una de mis postulaciones; 404 si no existe o es de otro técnico |
+
+- Solo `ROLE_PROFESSIONAL`; el técnico sale del token. Tabla `service_request_applications` (migración V3), con
+  estados `APPLIED -> SELECTED | REJECTED`.
+- La solicitud debe estar `PUBLISHED` y con el momento esperado por delante (si no, 409).
+- **Elegibilidad:** ms-users decide si el técnico puede atender la solicitud (categoría, zona de atención y
+  disponibilidad) en `POST /internal/technicians/{userId}/eligibility`, con la misma `INTERNAL_API_KEY` de la
+  revocación. Si no es elegible, 422 con `reasons`; si ms-users no responde, 503 y no se registra nada.
+  La consulta acepta varias solicitudes, para que las reglas de compatibilidad (GC-337) la reutilicen.
+- La consulta a ms-users va fuera de la transacción; después se bloquea la solicitud y se vuelve a comprobar que
+  siga abierta, para que una postulación no se cruce con la selección del prestador (GC-348).
+- La verificación del técnico (`VALID`) todavía no se exige: no existe el flujo de verificación (pendiente de RN-001).
+
 ## Pruebas
 
 Requiere Java 21 (`export JAVA_HOME=$(/usr/libexec/java_home -v 21)`).
