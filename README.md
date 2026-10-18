@@ -88,3 +88,31 @@ GC-301.
 - Nombre `ServiceRequest` (Jira: "solicitud") frente a `SERVICIO` en el DD V3.
 - Las categorías se redefinen aquí con los mismos valores que `ms-users`.
 - Las fotos guardan la clave del objeto en el almacenamiento, no la URL.
+
+## Cotización (GC-353)
+
+`Quotation` (tabla `quotations`, migración V2): la cotización del prestador seleccionado para una solicitud, con valor,
+moneda, alcance, condiciones, fecha acordada y vigencia (RF-031). El pago del servicio ocurre fuera de Fixia.
+
+| Estado | Significado |
+|---|---|
+| `SENT` | Enviada por el prestador seleccionado; espera respuesta del cliente |
+| `ACCEPTED` | Aceptada por el cliente (terminal) |
+| `REJECTED` | Rechazada por el cliente (terminal) |
+| `EXPIRED` | Pasó su vigencia sin respuesta (terminal) |
+| `SUPERSEDED` | Reemplazada por una cotización más reciente del mismo prestador (terminal) |
+
+```
+SENT -> ACCEPTED | REJECTED | EXPIRED | SUPERSEDED
+```
+
+- Solo la crea el prestador seleccionado (`provider_id` = `selected_provider_id`, el `users.id` del técnico en
+  ms-users) de una solicitud en `PROVIDER_SELECTED`.
+- Una cotización enviada **no se edita**: para cambiar condiciones se envía otra y la anterior queda `SUPERSEDED`.
+  Así ninguna cotización modificada queda vigente sin una nueva aceptación (RF-033).
+- Una cotización vencida (`valid_until` ya pasó) no se puede aceptar aunque todavía figure `SENT`.
+- Valor `NUMERIC(12,2)` mayor que cero y moneda explícita (RF-073); por ahora solo `COP`.
+- La base valida valor, moneda, estado, que la vigencia no pase de la fecha acordada y que una cotización aceptada o
+  rechazada tenga fecha de respuesta. Borrar la solicitud borra sus cotizaciones.
+- Pendiente para la API (GC-354): que una solicitud tenga a lo sumo una cotización `SENT` y una `ACCEPTED`. Se
+  controla en el servicio, porque H2 no admite índices únicos parciales.
