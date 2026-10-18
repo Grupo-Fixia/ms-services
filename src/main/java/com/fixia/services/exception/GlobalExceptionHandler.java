@@ -1,5 +1,6 @@
 package com.fixia.services.exception;
 
+import com.fixia.services.client.EligibilityCheckException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -55,6 +56,45 @@ public class GlobalExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.NOT_FOUND, "No existe la solicitud indicada");
         problem.setTitle("Solicitud no encontrada");
+        return problem;
+    }
+
+    @ExceptionHandler(ServiceRequestNotAvailableException.class)
+    public ProblemDetail handleRequestNotAvailable(ServiceRequestNotAvailableException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Solicitud no disponible");
+        return problem;
+    }
+
+    /** 422 con los motivos, para que el técnico sepa qué le falta (categoría, zona u horario). */
+    @ExceptionHandler(TechnicianNotEligibleException.class)
+    public ProblemDetail handleNotEligible(TechnicianNotEligibleException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, ex.getMessage());
+        problem.setTitle("No elegible");
+        problem.setProperty("reasons", ex.getReasons());
+        return problem;
+    }
+
+    /** Falla cerrado: sin respuesta de ms-users no se registra la postulación. */
+    @ExceptionHandler(EligibilityCheckException.class)
+    public ProblemDetail handleEligibilityUnavailable(EligibilityCheckException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
+                "No fue posible verificar tu elegibilidad. Intenta de nuevo en unos minutos");
+        problem.setTitle("Elegibilidad no verificable");
+        return problem;
+    }
+
+    @ExceptionHandler(ApplicationNotFoundException.class)
+    public ProblemDetail handleApplicationNotFound(ApplicationNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Postulación no encontrada");
+        return problem;
+    }
+
+    @ExceptionHandler(InvalidApplicationTransitionException.class)
+    public ProblemDetail handleInvalidApplicationTransition(InvalidApplicationTransitionException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Cambio de estado no permitido");
         return problem;
     }
 }

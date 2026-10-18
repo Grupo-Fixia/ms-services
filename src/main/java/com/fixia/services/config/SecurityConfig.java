@@ -26,6 +26,7 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/health/**").permitAll()
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/api/services/requests/**").hasAuthority("ROLE_CLIENT")
+                        .requestMatchers("/api/services/applications/**").hasAuthority("ROLE_PROFESSIONAL")
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))

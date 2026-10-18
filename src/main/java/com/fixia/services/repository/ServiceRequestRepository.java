@@ -1,8 +1,12 @@
 package com.fixia.services.repository;
 
 import com.fixia.services.domain.ServiceRequest;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
@@ -17,4 +21,12 @@ public interface ServiceRequestRepository extends JpaRepository<ServiceRequest, 
 
     @EntityGraph(attributePaths = "photos")
     List<ServiceRequest> findByClientIdOrderByPublishedAtDesc(UUID clientId);
+
+    /**
+     * Para escribir: toma la fila de la solicitud en exclusiva hasta el fin de la transacción, de modo que una
+     * postulación (GC-342) y la selección del prestador (GC-348) no se crucen.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select r from ServiceRequest r where r.id = :id")
+    Optional<ServiceRequest> findByIdForUpdate(@Param("id") UUID id);
 }
