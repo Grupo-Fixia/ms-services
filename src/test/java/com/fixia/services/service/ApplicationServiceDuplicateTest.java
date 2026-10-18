@@ -71,7 +71,7 @@ class ApplicationServiceDuplicateTest {
     @Test
     void laViolacionDeLaRestriccionUnicaSeTraduceAPostulacionDuplicada() {
         when(applications.saveAndFlush(any())).thenThrow(violation(
-                "duplicate key value violates unique constraint \"uk_service_request_applications\""));
+                "duplicate key value violates unique constraint \"uk_applications\""));
 
         assertThatThrownBy(() -> service.apply(TECHNICIAN, request.getId()))
                 .isInstanceOf(DuplicateApplicationException.class)
@@ -80,7 +80,7 @@ class ApplicationServiceDuplicateTest {
 
     @Test
     void otraViolacionDeIntegridadNoSeConfundeConUnDuplicado() {
-        DataIntegrityViolationException other = violation("violates check constraint \"ck_service_request_applications_status\"");
+        DataIntegrityViolationException other = violation("violates check constraint \"ck_applications_status\"");
         when(applications.saveAndFlush(any())).thenThrow(other);
 
         assertThatThrownBy(() -> service.apply(TECHNICIAN, request.getId())).isSameAs(other);
@@ -88,7 +88,7 @@ class ApplicationServiceDuplicateTest {
 
     @Test
     void reconoceLaRestriccionSinImportarMayusculasYTolerUnMensajeVacio() {
-        assertThat(ApplicationService.isDuplicate(violation("Unique index violation: PUBLIC.UK_SERVICE_REQUEST_APPLICATIONS"))).isTrue();
+        assertThat(ApplicationService.isDuplicate(violation("Unique index violation: PUBLIC.UK_APPLICATIONS"))).isTrue();
         assertThat(ApplicationService.isDuplicate(new DataIntegrityViolationException(null))).isFalse();
     }
 }

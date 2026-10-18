@@ -29,7 +29,7 @@ import java.util.stream.Collectors;
 public class ApplicationService {
 
     /** Restricción única (solicitud, técnico) de la migración V4. */
-    static final String UNIQUE_CONSTRAINT = "uk_service_request_applications";
+    static final String UNIQUE_CONSTRAINT = "uk_applications";
 
     private final ServiceRequestRepository serviceRequestRepository;
     private final ServiceRequestApplicationRepository applicationRepository;

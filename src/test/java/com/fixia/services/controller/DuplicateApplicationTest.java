@@ -158,10 +158,10 @@ class DuplicateApplicationTest {
         ServiceRequest request = publishedRequest();
         apply(TECHNICIAN, request.getId()).andExpect(status().isCreated());
 
-        assertThatThrownBy(() -> jdbcTemplate.update("INSERT INTO service_request_applications (id, service_request_id, "
+        assertThatThrownBy(() -> jdbcTemplate.update("INSERT INTO applications (id, service_request_id, "
                         + "provider_id, status, created_at, updated_at, version) VALUES (?, ?, ?, 'APPLIED', "
                         + "CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0)", UUID.randomUUID(), request.getId(), TECHNICIAN))
                 .isInstanceOf(DataIntegrityViolationException.class)
-                .hasMessageContaining("uk_service_request_applications");
+                .hasMessageContaining("uk_applications");
     }
 }
