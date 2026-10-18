@@ -63,6 +63,10 @@ devuelve hasta que la solicitud está `CONTRACTED`.
   La consulta acepta varias solicitudes, para que las reglas de compatibilidad (GC-337) la reutilicen.
 - La consulta a ms-users va fuera de la transacción; después se bloquea la solicitud y se vuelve a comprobar que
   siga abierta, para que una postulación no se cruce con la selección del prestador (GC-348).
+- **Sin duplicados (GC-343):** un técnico se postula una sola vez a cada solicitud. Se comprueba antes de consultar a
+  ms-users y otra vez con la solicitud bloqueada; además, la base lo impide con la restricción única
+  `(service_request_id, provider_id)` (migración V4). La respuesta es 409 "Postulación duplicada" con el
+  `applicationId` existente.
 - La verificación del técnico (`VALID`) todavía no se exige: no existe el flujo de verificación (pendiente de RN-001).
 
 ## Pruebas
