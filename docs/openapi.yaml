@@ -136,7 +136,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: La solicitud ya no recibe postulaciones (no está publicada o su fecha esperada pasó).
+          description: |
+            La solicitud ya no recibe postulaciones (no está publicada o su fecha esperada pasó), o el técnico ya se
+            postuló a ella (GC-343, título "Postulación duplicada" y `applicationId` con la postulación existente).
           content:
             application/problem+json:
               schema:

@@ -97,4 +97,15 @@ public class GlobalExceptionHandler {
         problem.setTitle("Cambio de estado no permitido");
         return problem;
     }
+
+    /** 409 con el id de la postulación existente cuando se conoce (GC-343). */
+    @ExceptionHandler(DuplicateApplicationException.class)
+    public ProblemDetail handleDuplicateApplication(DuplicateApplicationException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Postulación duplicada");
+        if (ex.getExistingApplicationId() != null) {
+            problem.setProperty("applicationId", ex.getExistingApplicationId());
+        }
+        return problem;
+    }
 }
