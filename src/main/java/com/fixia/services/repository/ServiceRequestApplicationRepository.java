@@ -15,6 +15,9 @@ public interface ServiceRequestApplicationRepository extends JpaRepository<Servi
     /** Una postulación del técnico; vacío si no existe o es de otro técnico. */
     Optional<ServiceRequestApplication> findByIdAndProviderId(UUID id, UUID providerId);
 
+    /** La postulación del técnico a la solicitud, si ya existe (GC-343). */
+    Optional<ServiceRequestApplication> findByServiceRequestIdAndProviderId(UUID serviceRequestId, UUID providerId);
+
     /** Postulaciones de una solicitud en orden de llegada (para consultar postulantes y seleccionar, GC-347/348). */
     List<ServiceRequestApplication> findByServiceRequestIdOrderByCreatedAtAsc(UUID serviceRequestId);
 }
