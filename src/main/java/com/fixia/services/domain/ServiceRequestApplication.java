@@ -26,7 +26,7 @@ import java.util.UUID;
  * {@link ApplicationStatus#canTransitionTo(ApplicationStatus)}.
  */
 @Entity
-@Table(name = "service_request_applications")
+@Table(name = "applications")
 public class ServiceRequestApplication {
 
     @Id

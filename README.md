@@ -54,7 +54,7 @@ devuelve hasta que la solicitud está `CONTRACTED`.
 | `GET /api/services/applications` | Mis postulaciones, la más reciente primero |
 | `GET /api/services/applications/{id}` | Una de mis postulaciones; 404 si no existe o es de otro técnico |
 
-- Solo `ROLE_PROFESSIONAL`; el técnico sale del token. Tabla `service_request_applications` (migración V3), con
+- Solo `ROLE_PROFESSIONAL`; el técnico sale del token. Tabla `applications` (migración V3), con
   estados `APPLIED -> SELECTED | REJECTED`.
 - La solicitud debe estar `PUBLISHED` y con el momento esperado por delante (si no, 409).
 - **Elegibilidad:** ms-users decide si el técnico puede atender la solicitud (categoría, zona de atención y

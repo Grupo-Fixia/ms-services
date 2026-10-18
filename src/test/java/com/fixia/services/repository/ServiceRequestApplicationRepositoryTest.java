@@ -136,7 +136,7 @@ class ServiceRequestApplicationRepositoryTest {
     @Test
     void laBaseRechazaUnEstadoInvalidoOUnaSolicitudInexistente() {
         UUID request = publishedRequest().getId();
-        String insert = "INSERT INTO service_request_applications (id, service_request_id, provider_id, status, "
+        String insert = "INSERT INTO applications (id, service_request_id, provider_id, status, "
                 + "created_at, updated_at, version) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0)";
 
         assertThatThrownBy(() -> jdbcTemplate.update(insert, UUID.randomUUID(), request, PROVIDER, "WITHDRAWN"))
