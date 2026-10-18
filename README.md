@@ -1,12 +1,50 @@
 # ms-services
 
-Microservicio de **solicitudes de servicio** de Fixia: modelo, estados y (en tareas posteriores) API de
-publicación, postulaciones, selección de prestador y contratación.
+Microservicio de **solicitudes de servicio** de Fixia: modelo y estados (GC-332), API para publicar y consultar
+solicitudes (GC-333) y, en tareas posteriores, postulaciones, selección de prestador y contratación.
 
 - Java 21, Spring Boot 3.2.5, Maven
 - PostgreSQL 16 (base propia, migraciones con Flyway)
 - Estructura en capas Spring, igual que `ms-users`: `config`, `controller`, `service`, `repository`, `domain`,
-  `dto`, `exception` (ver SDD V2 §3.1, desviación P-06 pendiente de decisión)
+  `dto`, `exception`, `client` (ver SDD V2 §3.1, desviación P-06 pendiente de decisión)
+
+## Configuración
+
+| Variable | Descripción | Por defecto |
+|---|---|---|
+| `SPRING_DATASOURCE_URL` / `_USERNAME` / `_PASSWORD` | Conexión a PostgreSQL | `localhost:5432/ms-services` |
+| `JWT_PUBLIC_KEY` | Clave pública RSA de ms-users en PEM (X.509), para verificar tokens | **obligatoria** fuera de `local` y `test` |
+| `JWT_ISSUER` / `JWT_AUDIENCE` | Claims `iss` y `aud` esperados | `https://auth.fixia.com` / `https://api.fixia.com` |
+| `USERS_BASE_URL` | URL interna de ms-users | `http://ms-users:8080` |
+| `INTERNAL_API_KEY` | Clave compartida con ms-users para su ruta interna de revocación (el mismo valor en ambos) | vacía: toda petición autenticada se rechaza |
+| `USERS_CONNECT_TIMEOUT` / `USERS_READ_TIMEOUT` | Tiempos de espera hacia ms-users | `1s` / `2s` |
+
+Sin `JWT_PUBLIC_KEY` el servicio **no arranca** (salvo en `local` y `test`, que usan una clave efímera). Las claves
+y la clave interna nunca se guardan en el repositorio.
+
+## Seguridad
+
+- Los tokens los emite ms-users (RS256); este servicio solo los **verifica** con la clave pública.
+- La lista de tokens revocados vive en la base de ms-users (Database per Service). En **cada** petición
+  autenticada se consulta `GET /internal/tokens/{jti}/status` de ms-users con la cabecera `X-Internal-Api-Key`.
+  Un cierre de sesión surte efecto de inmediato (sin caché).
+- **Falla cerrado**: si ms-users no responde (caído, lento o con error), la petición se rechaza con 401. Es una
+  dependencia consciente: sin ms-users, las rutas autenticadas de este servicio no están disponibles.
+- Roles: las rutas `/api/services/requests/**` exigen `ROLE_CLIENT`; un técnico recibe 403.
+- Todas las respuestas 401 son idénticas y no indican el motivo.
+
+## API (GC-333)
+
+Contrato completo en [`docs/openapi.yaml`](docs/openapi.yaml).
+
+| Método y ruta | Descripción |
+|---|---|
+| `POST /api/services/requests` | Publica una solicitud en estado `PUBLISHED` (201 + `Location`) |
+| `GET /api/services/requests` | Mis solicitudes, la más reciente primero (sin paginación por ahora) |
+| `GET /api/services/requests/{id}` | Una de mis solicitudes; 404 si no existe o es de otro cliente |
+
+El cliente sale siempre del token, nunca del cuerpo ni de la ruta. La dirección exacta se guarda pero no se
+devuelve hasta que la solicitud está `CONTRACTED`.
 
 ## Pruebas
 
@@ -17,7 +55,8 @@ mvn -B test      # lo que corre el CI
 mvn -B verify    # tests + cobertura JaCoCo (mínimo 85 % de líneas)
 ```
 
-Las pruebas usan H2 en modo PostgreSQL con las mismas migraciones Flyway; no necesitan Docker.
+Las pruebas usan H2 en modo PostgreSQL con las mismas migraciones Flyway; no necesitan Docker ni ms-users (la
+consulta de revocación se simula).
 
 ## Modelo (GC-332)
 
