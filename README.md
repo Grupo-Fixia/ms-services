@@ -82,6 +82,28 @@ devuelve hasta que la solicitud está `CONTRACTED`.
 - Cada elemento trae `id`, `providerId`, `status` (`APPLIED`, `SELECTED` o `REJECTED`), `createdAt` y `updatedAt`.
   No incluye datos de la solicitud ni ubicación. El perfil público del prestador se consulta aparte (GC-350).
 
+## Selección de prestador (GC-348)
+
+| Método y ruta | Descripción |
+|---|---|
+| `POST /api/services/requests/{id}/applications/{applicationId}/selection` | El cliente elige al prestador de su solicitud (200 con la solicitud en `PROVIDER_SELECTED`) |
+
+- Solo `ROLE_CLIENT`, y la solicitud debe ser suya. Una solicitud ajena, inexistente o con `id` inválido da la misma 404
+  que el resto de rutas; una postulación que no es de esa solicitud, no existe o no es un UUID da 404 "Postulación
+  no encontrada".
+- **Todo o nada.** En una sola transacción y con la solicitud bloqueada (`FOR UPDATE`): la solicitud pasa a
+  `PROVIDER_SELECTED` con `selectedProviderId`, la postulación elegida a `SELECTED` y las demás a `REJECTED`.
+- **Un solo prestador.** La solicitud debe seguir `PUBLISHED` y con el momento esperado por delante; si ya tiene
+  prestador, se canceló o su momento esperado pasó, la respuesta es 409 "Solicitud no disponible". Dos selecciones
+  simultáneas dejan una sola: la otra espera el bloqueo y recibe el 409. El mismo bloqueo evita que una postulación
+  nueva (GC-342) se cruce con la selección. El bloqueo solo se toma sobre solicitudes del propio cliente.
+- **Reintento seguro.** Repetir la selección sobre la postulación que ya quedó `SELECTED` devuelve 200 con el estado
+  actual y no cambia nada (útil si se pierde la respuesta); elegir otra postulación da 409.
+- **Pendiente:** ningún proceso mueve todavía las solicitudes con el momento esperado vencido a `EXPIRED`; hasta
+  entonces siguen `PUBLISHED` y solo se les rechaza la selección y la postulación.
+- La decisión queda persistida y se ve en `GET /api/services/requests/{id}/applications` (GC-347). La dirección exacta
+  sigue sin entregarse hasta que la solicitud esté `CONTRACTED`.
+
 ## Pruebas
 
 Requiere Java 21 (`export JAVA_HOME=$(/usr/libexec/java_home -v 21)`).
