@@ -46,6 +46,27 @@ Contrato completo en [`docs/openapi.yaml`](docs/openapi.yaml).
 El cliente sale siempre del token, nunca del cuerpo ni de la ruta. La dirección exacta se guarda pero no se
 devuelve hasta que la solicitud está `CONTRACTED`.
 
+## Oportunidades compatibles (GC-337)
+
+| Método y ruta | Descripción |
+|---|---|
+| `GET /api/services/applications/opportunities` | Solicitudes abiertas que el técnico puede atender y a las que aún no se ha postulado |
+
+- Solo `ROLE_PROFESSIONAL`; el técnico sale del token. La ruta fija tiene prioridad sobre `/applications/{id}`.
+- **Compatibilidad en dos pasos.** Aquí se preseleccionan las solicitudes `PUBLISHED` con el momento esperado por
+  delante y sin postulación de ese técnico, de la más reciente a la más antigua. Luego se pregunta a ms-users, que es
+  quien guarda sus especialidades, zona de atención y disponibilidad, en `POST /internal/technicians/{userId}/eligibility`,
+  por lotes de 100 (el máximo de esa consulta). Es la misma regla que se aplica al postularse (GC-342), así que una
+  oportunidad listada es una a la que el técnico puede postularse.
+- **Cota.** Se devuelven como máximo 50 oportunidades y se revisan como máximo 500 candidatas (las más recientes)
+  por consulta, hasta cinco llamadas a ms-users, para no recorrer todas las solicitudes publicadas en cada llamada.
+  **Limitación conocida:** si las 500 más recientes no son compatibles, las compatibles más antiguas no se listan.
+  Resolverlo bien exige filtrar por categoría y zona en la preselección o paginar (GC-338); un índice
+  `(status, published_at, id)` también conviene cuando crezca el volumen.
+- **Falla cerrado.** Si ms-users no responde, 503 "Elegibilidad no verificable" y no se devuelve nada.
+- Cada elemento trae `id`, `category`, `description`, `city`, `zone`, `latitude`, `longitude` (aproximadas),
+  `expectedAt` y `publishedAt`. No incluye al cliente, la dirección exacta ni las fotos.
+
 ## Postulaciones (GC-342)
 
 | Método y ruta | Descripción |
