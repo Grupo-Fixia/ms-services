@@ -21,8 +21,8 @@ import java.util.UUID;
  * reglas; este servicio solo envía lo que sabe de cada solicitud. Ruta interna
  * {@code POST /internal/technicians/{userId}/eligibility}, autenticada con la clave compartida.
  *
- * <p>Acepta varias solicitudes en una sola llamada para que las reglas de compatibilidad (GC-337) puedan reutilizarla
- * al listar solicitudes compatibles.
+ * <p>Acepta varias solicitudes en una sola llamada (hasta 100, el máximo de ms-users): la usa el listado de
+ * oportunidades compatibles ({@code OpportunityService}, GC-337), que consulta por lotes de ese tamaño.
  */
 @Component
 public class TechnicianEligibilityClient {
