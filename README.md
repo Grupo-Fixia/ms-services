@@ -69,6 +69,19 @@ devuelve hasta que la solicitud está `CONTRACTED`.
   `applicationId` existente.
 - La verificación del técnico (`VALID`) todavía no se exige: no existe el flujo de verificación (pendiente de RN-001).
 
+## Postulantes de una solicitud (GC-347)
+
+| Método y ruta | Descripción |
+|---|---|
+| `GET /api/services/requests/{id}/applications` | Prestadores postulados a una solicitud mía y el estado de cada postulación |
+
+- Solo `ROLE_CLIENT`. La solicitud debe ser del cliente del token: si no existe, es de otro cliente o el `id` no es
+  un UUID, la respuesta es la misma (404 "No existe la solicitud indicada").
+- Lista en orden de llegada (la primera postulación primero); sin postulantes, `200` con `[]`. Sin paginación por
+  ahora. Se puede consultar en cualquier estado de la solicitud, para ver también a quién se eligió.
+- Cada elemento trae `id`, `providerId`, `status` (`APPLIED`, `SELECTED` o `REJECTED`), `createdAt` y `updatedAt`.
+  No incluye datos de la solicitud ni ubicación. El perfil público del prestador se consulta aparte (GC-350).
+
 ## Pruebas
 
 Requiere Java 21 (`export JAVA_HOME=$(/usr/libexec/java_home -v 21)`).

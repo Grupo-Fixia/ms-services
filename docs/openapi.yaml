@@ -104,6 +104,39 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/services/requests/{id}/applications:
+    get:
+      summary: Consultar los postulantes de una de mis solicitudes (GC-347)
+      description: |
+        Prestadores postulados a la solicitud y el estado de cada postulación, en orden de llegada (la primera
+        postulación primero). Sin postulantes responde `200` con `[]`. No incluye datos de la solicitud ni ubicación;
+        el perfil público del prestador se consulta aparte. Si la solicitud no existe, es de otro cliente o el
+        identificador no es un UUID, la respuesta es la misma 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Postulantes de la solicitud.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Applicant'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/services/applications:
     post:
       summary: Postularse a una solicitud disponible (GC-342)
@@ -378,6 +411,16 @@ components:
             latitude: { type: number, nullable: true }
             longitude: { type: number, nullable: true }
             expectedAt: { type: string, format: date-time }
+
+    Applicant:
+      type: object
+      description: Postulante a una solicitud, tal como lo ve el cliente dueño.
+      properties:
+        id: { type: string, format: uuid, description: Identificador de la postulación. }
+        providerId: { type: string, format: uuid, description: Identificador del prestador en ms-users. }
+        status: { $ref: '#/components/schemas/ApplicationStatus' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
 
     NotEligibleProblem:
       allOf:
