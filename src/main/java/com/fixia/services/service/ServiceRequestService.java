@@ -3,9 +3,11 @@ package com.fixia.services.service;
 import com.fixia.services.domain.ApproximateLocation;
 import com.fixia.services.domain.ExactLocation;
 import com.fixia.services.domain.ServiceRequest;
+import com.fixia.services.domain.ServiceRequestApplication;
 import com.fixia.services.dto.CreateServiceRequestRequest;
 import com.fixia.services.exception.InvalidServiceRequestException;
 import com.fixia.services.exception.ServiceRequestNotFoundException;
+import com.fixia.services.repository.ServiceRequestApplicationRepository;
 import com.fixia.services.repository.ServiceRequestRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,10 +20,13 @@ import java.util.UUID;
 public class ServiceRequestService {
 
     private final ServiceRequestRepository repository;
+    private final ServiceRequestApplicationRepository applicationRepository;
     private final Clock clock;
 
-    public ServiceRequestService(ServiceRequestRepository repository, Clock clock) {
+    public ServiceRequestService(ServiceRequestRepository repository,
+                                 ServiceRequestApplicationRepository applicationRepository, Clock clock) {
         this.repository = repository;
+        this.applicationRepository = applicationRepository;
         this.clock = clock;
     }
 
@@ -59,5 +64,16 @@ public class ServiceRequestService {
     @Transactional(readOnly = true)
     public List<ServiceRequest> list(UUID clientId) {
         return repository.findByClientIdOrderByPublishedAtDesc(clientId);
+    }
+
+    /**
+     * Postulaciones a una solicitud del cliente (GC-347), en orden de llegada. La solicitud debe ser suya: si no
+     * existe o es de otro cliente, la respuesta es la misma. Se consulta en cualquier estado de la solicitud, para
+     * que el cliente siga viendo a quién eligió y a quiénes no.
+     */
+    @Transactional(readOnly = true)
+    public List<ServiceRequestApplication> listApplicants(UUID clientId, UUID requestId) {
+        get(clientId, requestId);
+        return applicationRepository.findByServiceRequestIdOrderByCreatedAtAscIdAsc(requestId);
     }
 }
