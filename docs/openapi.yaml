@@ -234,6 +234,38 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/services/applications/opportunities:
+    get:
+      summary: Consultar mis oportunidades compatibles (GC-337)
+      description: |
+        Solicitudes abiertas (`PUBLISHED` y con el momento esperado por delante) que el técnico puede atender y a las
+        que aún no se ha postulado, la más reciente primero. La compatibilidad (categoría, zona de atención y
+        disponibilidad) la decide ms-users, con la misma regla que se aplica al postularse. Devuelve como máximo 50
+        oportunidades y revisa como máximo 500 candidatas; la paginación llega con GC-338. Si ms-users no responde,
+        503 y no se devuelve nada. Solo incluye la ubicación aproximada; no incluye al cliente, la dirección exacta
+        ni las fotos.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Oportunidades compatibles (puede ser una lista vacía).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Opportunity'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '503':
+          description: No fue posible verificar la elegibilidad con ms-users.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -264,6 +296,7 @@ components:
             status: 401
             detail: Se requiere autenticación válida
             instance: /api/services/requests
+
     Forbidden:
       description: Sesión válida, pero el rol no permite la acción (por ejemplo, un técnico en una ruta de cliente).
       content:
@@ -276,6 +309,7 @@ components:
             status: 403
             detail: Su rol no permite realizar esta acción
             instance: /api/services/requests
+
     NotFound:
       description: La solicitud no existe o no pertenece al cliente autenticado.
       content:
@@ -287,6 +321,7 @@ components:
             title: Solicitud no encontrada
             status: 404
             detail: No existe la solicitud indicada
+
     ValidationError:
       description: Datos inválidos o faltantes; `errors` indica qué corregir.
       content:
@@ -421,6 +456,20 @@ components:
         status: { $ref: '#/components/schemas/ApplicationStatus' }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+
+    Opportunity:
+      type: object
+      description: Solicitud compatible con el técnico. Solo ubicación aproximada.
+      properties:
+        id: { type: string, format: uuid }
+        category: { $ref: '#/components/schemas/ServiceCategory' }
+        description: { type: string }
+        city: { type: string }
+        zone: { type: string }
+        latitude: { type: number, nullable: true }
+        longitude: { type: number, nullable: true }
+        expectedAt: { type: string, format: date-time }
+        publishedAt: { type: string, format: date-time }
 
     NotEligibleProblem:
       allOf:
