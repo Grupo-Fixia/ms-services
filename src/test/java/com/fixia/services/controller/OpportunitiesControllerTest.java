@@ -1,0 +1,206 @@
+package com.fixia.services.controller;
+
+import com.fixia.services.client.EligibilityCheckException;
+import com.fixia.services.client.TechnicianEligibilityClient;
+import com.fixia.services.domain.ApproximateLocation;
+import com.fixia.services.domain.ExactLocation;
+import com.fixia.services.domain.ServiceCategory;
+import com.fixia.services.domain.ServiceRequest;
+import com.fixia.services.domain.ServiceRequestApplication;
+import com.fixia.services.repository.ServiceRequestApplicationRepository;
+import com.fixia.services.repository.ServiceRequestRepository;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.RequestPostProcessor;
+
+import java.time.Duration;
+import java.time.Instant;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.hasSize;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+/**
+ * Oportunidades compatibles de un técnico (GC-337). La autenticación se simula con el token ya validado ({@code jwt()})
+ * y la elegibilidad que decide ms-users con un doble del cliente.
+ */
+@SpringBootTest
+@AutoConfigureMockMvc
+@ActiveProfiles("test")
+class OpportunitiesControllerTest {
+
+    private static final String URL = "/api/services/applications/opportunities";
+    private static final UUID TECHNICIAN = UUID.randomUUID();
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private ServiceRequestRepository serviceRequestRepository;
+
+    @Autowired
+    private ServiceRequestApplicationRepository applicationRepository;
+
+    @MockBean
+    private TechnicianEligibilityClient eligibilityClient;
+
+    @BeforeEach
+    void cleanDatabase() {
+        applicationRepository.deleteAllInBatch();
+        serviceRequestRepository.deleteAllInBatch();
+    }
+
+    // ---------- Utilidades ----------
+
+    private ServiceRequest published(ServiceCategory category, String city, Instant publishedAt) {
+        return serviceRequestRepository.saveAndFlush(ServiceRequest.publish(UUID.randomUUID(), category,
+                "Fuga de agua en el baño", new ApproximateLocation(city, "Chapinero", 4.6533, -74.0836),
+                new ExactLocation("Calle 10 # 5-20, apto 301"), publishedAt.plus(Duration.ofDays(2)),
+                List.of("requests/a.jpg"), publishedAt));
+    }
+
+    /** ms-users responde elegible solo para las solicitudes indicadas. */
+    private void eligibleOnly(Set<UUID> eligibleIds) {
+        when(eligibilityClient.checkAll(any(), any())).thenAnswer(call -> {
+            List<ServiceRequest> asked = call.getArgument(1);
+            Map<UUID, TechnicianEligibilityClient.Result> results = new HashMap<>();
+            for (ServiceRequest candidate : asked) {
+                boolean eligible = eligibleIds.contains(candidate.getId());
+                results.put(candidate.getId(), new TechnicianEligibilityClient.Result(candidate.getId(), eligible,
+                        eligible ? List.of() : List.of("ZONE")));
+            }
+            return results;
+        });
+    }
+
+    private static RequestPostProcessor technician(UUID userId) {
+        return role(userId, "ROLE_PROFESSIONAL");
+    }
+
+    private static RequestPostProcessor role(UUID userId, String role) {
+        return jwt().jwt(token -> token.subject("usr_" + userId)).authorities(new SimpleGrantedAuthority(role));
+    }
+
+    // ---------- Consultar ----------
+
+    @Test
+    void devuelveSoloLasSolicitudesElegiblesLaMasRecientePrimero() throws Exception {
+        Instant now = Instant.now();
+        ServiceRequest older = published(ServiceCategory.PLUMBING, "Bogotá", now.minusSeconds(120));
+        ServiceRequest newer = published(ServiceCategory.PLUMBING, "Bogotá", now.minusSeconds(60));
+        ServiceRequest notEligible = published(ServiceCategory.ELECTRICAL, "Cali", now.minusSeconds(30));
+        eligibleOnly(Set.of(older.getId(), newer.getId()));
+
+        mockMvc.perform(get(URL).with(technician(TECHNICIAN)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(2)))
+                .andExpect(jsonPath("$[*].id", contains(newer.getId().toString(), older.getId().toString())))
+                .andExpect(jsonPath("$[0].category").value("PLUMBING"))
+                .andExpect(jsonPath("$[0].description").value("Fuga de agua en el baño"))
+                .andExpect(jsonPath("$[0].city").value("Bogotá"))
+                .andExpect(jsonPath("$[0].zone").value("Chapinero"))
+                .andExpect(jsonPath("$[0].latitude").value(4.65))
+                .andExpect(jsonPath("$[0].expectedAt").exists())
+                .andExpect(jsonPath("$[0].publishedAt").exists());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<ServiceRequest>> asked = ArgumentCaptor.forClass(List.class);
+        verify(eligibilityClient).checkAll(eq(TECHNICIAN), asked.capture());
+        assertThat(asked.getValue()).extracting(ServiceRequest::getId).contains(notEligible.getId());
+    }
+
+    @Test
+    void laRespuestaNoIncluyeDatosPrivadosDelClienteNiLaDireccionExactaNiFotos() throws Exception {
+        ServiceRequest request = published(ServiceCategory.PLUMBING, "Bogotá", Instant.now().minusSeconds(60));
+        eligibleOnly(Set.of(request.getId()));
+
+        String body = mockMvc.perform(get(URL).with(technician(TECHNICIAN)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].clientId").doesNotExist())
+                .andExpect(jsonPath("$[0].exactLocation").doesNotExist())
+                .andExpect(jsonPath("$[0].photoKeys").doesNotExist())
+                .andExpect(jsonPath("$[0].status").doesNotExist())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).doesNotContain("Calle 10").doesNotContain(request.getClientId().toString())
+                .doesNotContain("requests/a.jpg");
+    }
+
+    @Test
+    void noOfreceLasSolicitudesALasQueElTecnicoYaSePostuloPeroSiALosDemas() throws Exception {
+        Instant now = Instant.now();
+        ServiceRequest applied = published(ServiceCategory.PLUMBING, "Bogotá", now.minusSeconds(120));
+        ServiceRequest free = published(ServiceCategory.PLUMBING, "Bogotá", now.minusSeconds(60));
+        applicationRepository.saveAndFlush(ServiceRequestApplication.submit(applied, TECHNICIAN, now));
+        eligibleOnly(Set.of(applied.getId(), free.getId()));
+
+        mockMvc.perform(get(URL).with(technician(TECHNICIAN)))
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].id").value(free.getId().toString()));
+        mockMvc.perform(get(URL).with(technician(UUID.randomUUID())))
+                .andExpect(jsonPath("$", hasSize(2)));
+    }
+
+    @Test
+    void sinSolicitudesAbiertasResponde200ConListaVaciaSinConsultarAMsUsers() throws Exception {
+        mockMvc.perform(get(URL).with(technician(TECHNICIAN)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(0)));
+
+        verifyNoInteractions(eligibilityClient);
+    }
+
+    @Test
+    void siNoSePuedeVerificarLaElegibilidadResponde503SinDevolverSolicitudes() throws Exception {
+        published(ServiceCategory.PLUMBING, "Bogotá", Instant.now().minusSeconds(60));
+        when(eligibilityClient.checkAll(any(), any())).thenThrow(new EligibilityCheckException("ms-users caído"));
+
+        mockMvc.perform(get(URL).with(technician(TECHNICIAN)))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.title").value("Elegibilidad no verificable"));
+    }
+
+    @Test
+    void laRutaFijaNoSeConfundeConLaConsultaDeUnaPostulacion() throws Exception {
+        mockMvc.perform(get("/api/services/applications/" + UUID.randomUUID()).with(technician(TECHNICIAN)))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.title").value("Postulación no encontrada"));
+    }
+
+    // ---------- Autorización ----------
+
+    @Test
+    void sinTokenResponde401UnClienteResponde403YUnSubjectInvalidoResponde401() throws Exception {
+        mockMvc.perform(get(URL)).andExpect(status().isUnauthorized());
+        mockMvc.perform(get(URL).with(role(TECHNICIAN, "ROLE_CLIENT")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.title").value("Acceso denegado"));
+        mockMvc.perform(get(URL).with(jwt().jwt(token -> token.subject("no-es-usr"))
+                        .authorities(new SimpleGrantedAuthority("ROLE_PROFESSIONAL"))))
+                .andExpect(status().isUnauthorized());
+
+        verifyNoInteractions(eligibilityClient);
+    }
+}
