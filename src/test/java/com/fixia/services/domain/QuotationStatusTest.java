@@ -23,4 +23,10 @@ class QuotationStatusTest {
             assertThat(status.canTransitionTo(QuotationStatus.ACCEPTED)).as(status.name()).isFalse();
         }
     }
+
+    @Test
+    void cadaEstadoTieneSuNombreEnEspanol() {
+        assertThat(QuotationStatus.values()).extracting(QuotationStatus::getDisplayName)
+                .containsExactly("Enviada", "Aceptada", "Rechazada", "Vencida", "Reemplazada");
+    }
 }

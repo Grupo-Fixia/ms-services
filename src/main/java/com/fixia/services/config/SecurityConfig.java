@@ -28,6 +28,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/services/requests/**").hasAuthority("ROLE_CLIENT")
                         .requestMatchers("/api/services/applications/**").hasAuthority("ROLE_PROFESSIONAL")
                         .requestMatchers("/api/services/opportunities/**").hasAuthority("ROLE_PROFESSIONAL")
+                        .requestMatchers("/api/services/quotations/**").hasAuthority("ROLE_PROFESSIONAL")
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))

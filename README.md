@@ -180,13 +180,16 @@ GC-301.
 `Quotation` (tabla `quotations`, migración V2): la cotización del prestador seleccionado para una solicitud, con valor,
 moneda, alcance, condiciones, fecha acordada y vigencia (RF-031). El pago del servicio ocurre fuera de Fixia.
 
-| Estado | Significado |
-|---|---|
-| `SENT` | Enviada por el prestador seleccionado; espera respuesta del cliente |
-| `ACCEPTED` | Aceptada por el cliente (terminal) |
-| `REJECTED` | Rechazada por el cliente (terminal) |
-| `EXPIRED` | Pasó su vigencia sin respuesta (terminal) |
-| `SUPERSEDED` | Reemplazada por una cotización más reciente del mismo prestador (terminal) |
+| Estado | Nombre (`statusName`) | Significado |
+|---|---|---|
+| `SENT` | Enviada | Enviada por el prestador seleccionado; espera respuesta del cliente |
+| `ACCEPTED` | Aceptada | Aceptada por el cliente (terminal) |
+| `REJECTED` | Rechazada | Rechazada por el cliente (terminal) |
+| `EXPIRED` | Vencida | Pasó su vigencia sin respuesta (terminal) |
+| `SUPERSEDED` | Reemplazada | Reemplazada por una cotización más reciente del mismo prestador (terminal) |
+
+Como en ms-users (`ServiceCategory`: `PLUMBING` → "Plomería"), el código del estado va en inglés en la API y en la
+base, y el nombre en español es solo para mostrar: viaja en `statusName` (GC-354).
 
 ```
 SENT -> ACCEPTED | REJECTED | EXPIRED | SUPERSEDED
@@ -200,5 +203,29 @@ SENT -> ACCEPTED | REJECTED | EXPIRED | SUPERSEDED
 - Valor `NUMERIC(12,2)` mayor que cero y moneda explícita (RF-073); por ahora solo `COP`.
 - La base valida valor, moneda, estado, que la vigencia no pase de la fecha acordada y que una cotización aceptada o
   rechazada tenga fecha de respuesta. Borrar la solicitud borra sus cotizaciones.
-- Pendiente para la API (GC-354): que una solicitud tenga a lo sumo una cotización `SENT` y una `ACCEPTED`. Se
-  controla en el servicio, porque H2 no admite índices únicos parciales.
+- A lo sumo una cotización `SENT` y ninguna nueva si ya hay una `ACCEPTED` por solicitud: lo controla la API
+  (GC-354) con la solicitud bloqueada, porque H2 no admite índices únicos parciales.
+
+## API de cotizaciones (GC-354)
+
+| Método y ruta | Rol | Descripción |
+|---|---|---|
+| `POST /api/services/quotations` | `ROLE_PROFESSIONAL` | El prestador seleccionado crea y envía una cotización (201, `SENT`) |
+| `GET /api/services/quotations` | `ROLE_PROFESSIONAL` | Mis cotizaciones, la más reciente primero; filtro opcional `?serviceRequestId=` |
+| `GET /api/services/quotations/{quotationId}` | `ROLE_PROFESSIONAL` | Una de mis cotizaciones; 404 si no existe o es de otro prestador |
+| `GET /api/services/requests/{id}/quotations` | `ROLE_CLIENT` | Cotizaciones recibidas en mi solicitud, la más reciente primero |
+
+- Cuerpo del `POST`: `serviceRequestId`, `amount` (mayor que cero, dos decimales), `currency` (`COP`), `scope`,
+  `conditions` (hasta 2000 caracteres), `agreedAt` y `validUntil` (ISO-8601). El prestador sale del token.
+- **Selección vigente.** Solo cotiza el prestador seleccionado (GC-348) de una solicitud en `PROVIDER_SELECTED`. Si no
+  es él, o la solicitud ya no está en ese estado, responde 409 "Cotización no permitida" con el mismo mensaje, para no
+  revelar a quién se eligió. Si la solicitud ya tiene una cotización `ACCEPTED`, también 409.
+- **Fechas.** `agreedAt` y `validUntil` deben ser posteriores al envío y la vigencia no puede pasar de la fecha
+  acordada (400 "Datos inválidos").
+- **Nueva versión.** Enviar otra cotización deja la `SENT` anterior en `SUPERSEDED` (o `EXPIRED` si ya venció), en la
+  misma transacción y con la solicitud bloqueada (`FOR UPDATE`): siempre queda a lo sumo una esperando respuesta y
+  dos envíos simultáneos no dejan dos vigentes.
+- **Vencimiento.** La respuesta trae `expired: true` cuando la cotización sigue `SENT` pero su vigencia ya pasó; no se
+  puede aceptar. Ningún proceso la pasa todavía a `EXPIRED` por sí solo.
+- Aceptar o rechazar es GC-358. El evento `cotizacion.enviada` (ADR-024, outbox) queda pendiente: el servicio todavía
+  no tiene tabla OUTBOX ni publicador.

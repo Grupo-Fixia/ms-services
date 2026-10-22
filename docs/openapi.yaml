@@ -337,6 +337,133 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
 
+  /api/services/requests/{id}/quotations:
+    get:
+      summary: Cotizaciones recibidas en una de mis solicitudes (GC-354)
+      description: |
+        Solo `ROLE_CLIENT`. La más reciente primero. Si la solicitud no existe o es de otro cliente (o el identificador
+        no es un UUID), la respuesta es la misma 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Cotizaciones de la solicitud.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Quotation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/services/quotations:
+    post:
+      summary: Crear y enviar una cotización (GC-354)
+      description: |
+        Solo `ROLE_PROFESSIONAL`; el prestador sale del token. Debe ser el prestador seleccionado de una solicitud en
+        `PROVIDER_SELECTED`. La cotización queda `SENT`; si había otra `SENT` en la solicitud, queda `SUPERSEDED` (o
+        `EXPIRED` si ya había vencido). Todo ocurre con la solicitud bloqueada.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateQuotation'
+      responses:
+        '201':
+          description: Cotización enviada. La cabecera `Location` apunta a la cotización.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Quotation'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: |
+            "Cotización no permitida": el prestador no tiene una selección vigente en la solicitud, o la solicitud ya
+            tiene una cotización aceptada.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    get:
+      summary: Listar mis cotizaciones (GC-354)
+      description: Cotizaciones del prestador autenticado, la más reciente primero.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: serviceRequestId
+          in: query
+          required: false
+          description: Solo las de esta solicitud.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Cotizaciones del prestador.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Quotation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/services/quotations/{quotationId}:
+    get:
+      summary: Consultar una de mis cotizaciones (GC-354)
+      description: Si no existe, es de otro prestador o el identificador no es un UUID, la respuesta es la misma 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: quotationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Cotización del prestador.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Quotation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Cotización no encontrada.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -554,6 +681,44 @@ components:
         longitude: { type: number, nullable: true }
         expectedAt: { type: string, format: date-time }
         publishedAt: { type: string, format: date-time }
+
+    QuotationStatus:
+      type: string
+      enum: [SENT, ACCEPTED, REJECTED, EXPIRED, SUPERSEDED]
+      description: |
+        Código del estado (en inglés, como el resto de la API). Su nombre en español viaja en `statusName`:
+        Enviada, Aceptada, Rechazada, Vencida, Reemplazada.
+
+    CreateQuotation:
+      type: object
+      required: [serviceRequestId, amount, currency, scope, conditions, agreedAt, validUntil]
+      properties:
+        serviceRequestId: { type: string, format: uuid }
+        amount: { type: number, minimum: 0, exclusiveMinimum: true, example: 150000.00, description: Hasta dos decimales. }
+        currency: { type: string, enum: [COP] }
+        scope: { type: string, maxLength: 2000 }
+        conditions: { type: string, maxLength: 2000 }
+        agreedAt: { type: string, format: date-time, description: Fecha acordada para el servicio; posterior al envío. }
+        validUntil: { type: string, format: date-time, description: Vigencia; posterior al envío y no posterior a agreedAt. }
+
+    Quotation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        serviceRequestId: { type: string, format: uuid }
+        providerId: { type: string, format: uuid, description: Identificador del prestador en ms-users. }
+        amount: { type: number, example: 150000.00 }
+        currency: { type: string, enum: [COP] }
+        scope: { type: string }
+        conditions: { type: string }
+        agreedAt: { type: string, format: date-time }
+        validUntil: { type: string, format: date-time }
+        status: { $ref: '#/components/schemas/QuotationStatus' }
+        statusName: { type: string, example: Enviada, description: Nombre del estado en español, para mostrar. }
+        expired: { type: boolean, description: Sigue SENT pero su vigencia ya pasó; no se puede aceptar. }
+        respondedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
 
     NotEligibleProblem:
       allOf:
