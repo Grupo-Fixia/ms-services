@@ -21,7 +21,7 @@ import java.util.UUID;
 
 /**
  * Cotizaciones (GC-354): el prestador seleccionado las crea y envía; él y el cliente dueño de la solicitud las
- * consultan. Aceptar o rechazar es GC-358. Los actores siempre salen del token, nunca del cuerpo.
+ * consultan. El cliente las acepta o rechaza (GC-358). Los actores siempre salen del token, nunca del cuerpo.
  */
 @Service
 public class QuotationService {
@@ -113,6 +113,66 @@ public class QuotationService {
                 .filter(request -> request.getClientId().equals(clientId))
                 .orElseThrow(ServiceRequestNotFoundException::new);
         return quotationRepository.findByServiceRequestIdOrderByCreatedAtDesc(serviceRequestId);
+    }
+
+    /**
+     * El cliente acepta una cotización de su solicitud (GC-358). La solicitud <b>no</b> cambia de estado: formalizar
+     * la contratación (dirección exacta incluida) es GC-359, que se engancha en esta misma transacción.
+     */
+    @Transactional
+    public Quotation accept(UUID clientId, UUID serviceRequestId, UUID quotationId) {
+        return respond(clientId, serviceRequestId, quotationId, QuotationStatus.ACCEPTED);
+    }
+
+    /**
+     * El cliente rechaza una cotización de su solicitud (GC-358). La solicitud sigue con su prestador seleccionado,
+     * que puede enviar otra cotización.
+     */
+    @Transactional
+    public Quotation reject(UUID clientId, UUID serviceRequestId, UUID quotationId) {
+        return respond(clientId, serviceRequestId, quotationId, QuotationStatus.REJECTED);
+    }
+
+    /**
+     * Respuesta del cliente a una cotización, con la solicitud bloqueada hasta el fin de la transacción (la misma
+     * fila que toman el envío, la postulación y la selección): dos respuestas simultáneas, o una respuesta y un envío
+     * nuevo, no se cruzan.
+     *
+     * <ol>
+     *   <li>La solicitud debe ser del cliente y la cotización de esa solicitud; si no, la respuesta es la misma 404
+     *       (no se revela qué existe).
+     *   <li>Repetir la misma respuesta (aceptar una ya aceptada, rechazar una ya rechazada) devuelve el estado
+     *       actual sin cambiar nada, para que reintentar tras perder la respuesta no parezca un fallo.
+     *   <li>La solicitud debe seguir con prestador seleccionado, y la cotización ser de ese prestador (409).
+     *   <li>Aceptar exige que no haya ya otra aceptada (409).
+     *   <li>El dominio exige una cotización vigente en {@code SENT}: una rechazada, reemplazada, vencida o ya
+     *       respondida de otra forma no se acepta ni se rechaza (409), de modo que ninguna versión anterior o
+     *       modificada se acepta sin una nueva cotización (RF-033).
+     * </ol>
+     */
+    private Quotation respond(UUID clientId, UUID serviceRequestId, UUID quotationId, QuotationStatus decision) {
+        ServiceRequest request = serviceRequestRepository.findByIdAndClientIdForUpdate(serviceRequestId, clientId)
+                .orElseThrow(ServiceRequestNotFoundException::new);
+        Quotation quotation = quotationRepository.findByIdAndServiceRequestId(quotationId, request.getId())
+                .orElseThrow(QuotationNotFoundException::new);
+        if (quotation.getStatus() == decision) {
+            return quotation;
+        }
+        if (request.getStatus() != ServiceRequestStatus.PROVIDER_SELECTED
+                || !quotation.getProviderId().equals(request.getSelectedProviderId())) {
+            throw new QuotationNotAllowedException("La solicitud ya no admite responder cotizaciones");
+        }
+        Instant now = clock.instant();
+        if (decision == QuotationStatus.ACCEPTED) {
+            if (quotationRepository.findFirstByServiceRequestIdAndStatusOrderByCreatedAtDesc(request.getId(),
+                    QuotationStatus.ACCEPTED).isPresent()) {
+                throw new QuotationNotAllowedException("La solicitud ya tiene una cotización aceptada");
+            }
+            quotation.accept(now);
+        } else {
+            quotation.reject(now);
+        }
+        return quotation;
     }
 
     /** El instante con el que se calcula, al responder, si una cotización enviada ya venció. */

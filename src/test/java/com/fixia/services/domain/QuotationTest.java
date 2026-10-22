@@ -163,6 +163,20 @@ class QuotationTest {
     }
 
     @Test
+    void unaCotizacionVencidaTampocoSePuedeRechazar() {
+        Quotation quotation = send(selectedRequest(), PROVIDER, "350000");
+
+        assertThatThrownBy(() -> quotation.reject(VALID_UNTIL))
+                .isInstanceOf(InvalidQuotationTransitionException.class)
+                .hasMessage("La cotización está vencida y no se puede rechazar");
+        assertThat(quotation.getStatus()).isEqualTo(QuotationStatus.SENT);
+        assertThat(quotation.getRespondedAt()).isNull();
+
+        quotation.reject(VALID_UNTIL.minusSeconds(1));
+        assertThat(quotation.getStatus()).isEqualTo(QuotationStatus.REJECTED);
+    }
+
+    @Test
     void unaCotizacionReemplazadaRechazadaOAceptadaNoCambiaMas() {
         Quotation superseded = send(selectedRequest(), PROVIDER, "350000");
         superseded.supersede(NOW.plusSeconds(60));

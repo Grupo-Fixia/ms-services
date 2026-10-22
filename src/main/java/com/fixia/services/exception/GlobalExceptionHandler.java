@@ -145,4 +145,11 @@ public class GlobalExceptionHandler {
         problem.setTitle("Cotización no permitida");
         return problem;
     }
+
+    @ExceptionHandler(InvalidQuotationTransitionException.class)
+    public ProblemDetail handleInvalidQuotationTransition(InvalidQuotationTransitionException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Cambio de estado no permitido");
+        return problem;
+    }
 }

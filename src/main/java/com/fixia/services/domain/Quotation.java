@@ -149,8 +149,12 @@ public class Quotation {
         this.respondedAt = now;
     }
 
-    /** El cliente rechaza. */
+    /** El cliente rechaza. Como al aceptar, solo se responde una cotización vigente: una vencida ya no espera respuesta. */
     public void reject(Instant now) {
+        if (isExpiredAt(now)) {
+            throw new InvalidQuotationTransitionException(status, QuotationStatus.REJECTED,
+                    "La cotización está vencida y no se puede rechazar");
+        }
         transitionTo(QuotationStatus.REJECTED, now);
         this.respondedAt = now;
     }

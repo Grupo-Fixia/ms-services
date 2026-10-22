@@ -1,5 +1,6 @@
 package com.fixia.services.controller;
 
+import com.fixia.services.domain.Quotation;
 import com.fixia.services.dto.QuotationResponse;
 import com.fixia.services.service.QuotationService;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -7,6 +8,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -15,8 +17,8 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Cotizaciones recibidas en una solicitud del cliente autenticado (GC-354). Va bajo {@code /api/services/requests},
- * así que solo admite {@code ROLE_CLIENT} (ver SecurityConfig). Aceptar o rechazar llega con GC-358.
+ * Cotizaciones recibidas en una solicitud del cliente autenticado (GC-354), que además las acepta o rechaza (GC-358).
+ * Va bajo {@code /api/services/requests}, así que solo admite {@code ROLE_CLIENT} (ver SecurityConfig).
  */
 @RestController
 @RequestMapping("/api/services/requests/{id}/quotations")
@@ -37,6 +39,22 @@ public class ServiceRequestQuotationController {
         return service.listForClient(clientId(jwt), id).stream()
                 .map(quotation -> QuotationResponse.from(quotation, now))
                 .toList();
+    }
+
+    /** Acepta la cotización: 200 con ella ya en {@code ACCEPTED}; repetir devuelve lo mismo (idempotente). */
+    @PostMapping("/{quotationId}/acceptance")
+    public QuotationResponse accept(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+                                    @PathVariable UUID quotationId) {
+        Quotation accepted = service.accept(clientId(jwt), id, quotationId);
+        return QuotationResponse.from(accepted, service.now());
+    }
+
+    /** Rechaza la cotización: 200 con ella ya en {@code REJECTED}; repetir devuelve lo mismo (idempotente). */
+    @PostMapping("/{quotationId}/rejection")
+    public QuotationResponse reject(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+                                    @PathVariable UUID quotationId) {
+        Quotation rejected = service.reject(clientId(jwt), id, quotationId);
+        return QuotationResponse.from(rejected, service.now());
     }
 
     /**
