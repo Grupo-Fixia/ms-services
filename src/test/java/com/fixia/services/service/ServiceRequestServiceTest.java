@@ -3,12 +3,15 @@ package com.fixia.services.service;
 import com.fixia.services.domain.ApproximateLocation;
 import com.fixia.services.domain.ServiceCategory;
 import com.fixia.services.domain.ServiceRequest;
+import com.fixia.services.domain.ServiceRequestApplication;
 import com.fixia.services.dto.ApproximateLocationRequest;
 import com.fixia.services.dto.CreateServiceRequestRequest;
 import com.fixia.services.exception.InvalidServiceRequestException;
 import com.fixia.services.exception.ServiceRequestNotFoundException;
+import com.fixia.services.repository.ServiceRequestApplicationRepository;
 import com.fixia.services.repository.ServiceRequestRepository;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -23,6 +26,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 /**
@@ -34,8 +38,10 @@ class ServiceRequestServiceTest {
     private static final UUID CLIENT = UUID.randomUUID();
 
     private final ServiceRequestRepository repository = mock(ServiceRequestRepository.class);
+    private final ServiceRequestApplicationRepository applicationRepository =
+            mock(ServiceRequestApplicationRepository.class);
     private final ServiceRequestService service =
-            new ServiceRequestService(repository, Clock.fixed(NOW, ZoneOffset.UTC));
+            new ServiceRequestService(repository, applicationRepository, Clock.fixed(NOW, ZoneOffset.UTC));
 
     private static CreateServiceRequestRequest request(Instant expectedAt) {
         return new CreateServiceRequestRequest(ServiceCategory.PLUMBING, "Fuga de agua",
@@ -73,5 +79,37 @@ class ServiceRequestServiceTest {
         assertThatThrownBy(() -> service.get(CLIENT, id)).isInstanceOf(ServiceRequestNotFoundException.class);
         assertThatThrownBy(() -> service.get(CLIENT, UUID.randomUUID()))
                 .isInstanceOf(ServiceRequestNotFoundException.class);
+    }
+
+    @Test
+    void losPostulantesSeConsultanSoloSiLaSolicitudEsDelCliente() {
+        ServiceRequest own = persisted(CLIENT);
+        ServiceRequestApplication application = ServiceRequestApplication.submit(own, UUID.randomUUID(), NOW);
+        when(repository.findById(own.getId())).thenReturn(Optional.of(own));
+        when(applicationRepository.findByServiceRequestIdOrderByCreatedAtAscIdAsc(own.getId()))
+                .thenReturn(List.of(application));
+
+        assertThat(service.listApplicants(CLIENT, own.getId())).containsExactly(application);
+    }
+
+    @Test
+    void consultarLosPostulantesDeUnaSolicitudAjenaOInexistenteNoLlegaAlRepositorioDePostulaciones() {
+        ServiceRequest foreign = persisted(UUID.randomUUID());
+        when(repository.findById(foreign.getId())).thenReturn(Optional.of(foreign));
+
+        assertThatThrownBy(() -> service.listApplicants(CLIENT, foreign.getId()))
+                .isInstanceOf(ServiceRequestNotFoundException.class);
+        assertThatThrownBy(() -> service.listApplicants(CLIENT, UUID.randomUUID()))
+                .isInstanceOf(ServiceRequestNotFoundException.class);
+
+        verifyNoInteractions(applicationRepository);
+    }
+
+    /** Una solicitud con id, como la entrega el repositorio (el id lo genera JPA al guardar). */
+    private static ServiceRequest persisted(UUID clientId) {
+        ServiceRequest request = ServiceRequest.publish(clientId, ServiceCategory.PAINTING, "Pintar",
+                new ApproximateLocation("Cali", "Granada"), null, NOW.plusSeconds(3600), List.of(), NOW);
+        ReflectionTestUtils.setField(request, "id", UUID.randomUUID());
+        return request;
     }
 }
