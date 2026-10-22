@@ -30,6 +30,7 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -194,7 +195,9 @@ class ContractControllerTest {
         assertThat(contract.getCurrency()).isEqualTo(CurrencyCode.COP);
         assertThat(contract.getScope()).isEqualTo("Cambio de tubería del lavamanos");
         assertThat(contract.getConditions()).isEqualTo("Incluye materiales; pago al terminar");
-        assertThat(contract.getAgreedAt()).isEqualTo(quotation.getAgreedAt());
+        // la base guarda microsegundos (redondea); Instant.now() en Linux trae nanosegundos
+        assertThat(Duration.between(contract.getAgreedAt(), quotation.getAgreedAt()).abs())
+                .isLessThanOrEqualTo(Duration.of(1, ChronoUnit.MICROS));
         assertThat(serviceRequestRepository.findById(request.getId()).orElseThrow().getStatus())
                 .isEqualTo(ServiceRequestStatus.CONTRACTED);
         assertThat(quotationRepository.findById(quotation.getId()).orElseThrow().getStatus())
