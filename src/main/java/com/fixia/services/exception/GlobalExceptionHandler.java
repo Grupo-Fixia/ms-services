@@ -53,9 +53,24 @@ public class GlobalExceptionHandler {
     /** Un identificador que no es UUID se trata igual que uno inexistente: no se distingue en la respuesta. */
     @ExceptionHandler({ServiceRequestNotFoundException.class, MethodArgumentTypeMismatchException.class})
     public ProblemDetail handleNotFound(Exception ex) {
+        // El id de postulación mal formado es una postulación inexistente, no una solicitud inexistente.
+        if (ex instanceof MethodArgumentTypeMismatchException mismatch && "applicationId".equals(mismatch.getName())) {
+            return handleApplicationNotFound(new ApplicationNotFoundException());
+        }
+        // Lo mismo con el id de cotización (GC-354).
+        if (ex instanceof MethodArgumentTypeMismatchException mismatch && "quotationId".equals(mismatch.getName())) {
+            return handleQuotationNotFound(new QuotationNotFoundException());
+        }
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.NOT_FOUND, "No existe la solicitud indicada");
         problem.setTitle("Solicitud no encontrada");
+        return problem;
+    }
+
+    @ExceptionHandler(InvalidOpportunityQueryException.class)
+    public ProblemDetail handleInvalidOpportunityQuery(InvalidOpportunityQueryException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Consulta inválida");
         return problem;
     }
 
@@ -106,6 +121,28 @@ public class GlobalExceptionHandler {
         if (ex.getExistingApplicationId() != null) {
             problem.setProperty("applicationId", ex.getExistingApplicationId());
         }
+        return problem;
+    }
+
+    @ExceptionHandler(QuotationNotFoundException.class)
+    public ProblemDetail handleQuotationNotFound(QuotationNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Cotización no encontrada");
+        return problem;
+    }
+
+    @ExceptionHandler(InvalidQuotationException.class)
+    public ProblemDetail handleInvalidQuotation(InvalidQuotationException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Datos inválidos");
+        return problem;
+    }
+
+    /** 409: sin selección vigente para el prestador o con una cotización ya aceptada (GC-354). */
+    @ExceptionHandler(QuotationNotAllowedException.class)
+    public ProblemDetail handleQuotationNotAllowed(QuotationNotAllowedException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Cotización no permitida");
         return problem;
     }
 }

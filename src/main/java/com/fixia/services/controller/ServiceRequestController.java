@@ -1,6 +1,7 @@
 package com.fixia.services.controller;
 
 import com.fixia.services.domain.ServiceRequest;
+import com.fixia.services.dto.ApplicantResponse;
 import com.fixia.services.dto.CreateServiceRequestRequest;
 import com.fixia.services.dto.ServiceRequestResponse;
 import com.fixia.services.service.ServiceRequestService;
@@ -55,6 +56,22 @@ public class ServiceRequestController {
     @GetMapping("/{id}")
     public ServiceRequestResponse get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
         return ServiceRequestResponse.from(service.get(clientId(jwt), id));
+    }
+
+    /** Prestadores postulados a una solicitud propia y el estado de cada postulación (GC-347). */
+    @GetMapping("/{id}/applications")
+    public List<ApplicantResponse> applicants(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return service.listApplicants(clientId(jwt), id).stream().map(ApplicantResponse::from).toList();
+    }
+
+    /**
+     * Elige al prestador de la solicitud entre sus postulantes (GC-348). Devuelve la solicitud ya en
+     * {@code PROVIDER_SELECTED}; los estados de las postulaciones se consultan en {@code /applications}.
+     */
+    @PostMapping("/{id}/applications/{applicationId}/selection")
+    public ServiceRequestResponse selectProvider(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+                                                 @PathVariable UUID applicationId) {
+        return ServiceRequestResponse.from(service.selectProvider(clientId(jwt), id, applicationId));
     }
 
     /**

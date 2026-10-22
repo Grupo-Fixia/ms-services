@@ -13,23 +13,37 @@ import java.util.Set;
  *
  * Una cotización enviada no se edita: si el prestador cambia las condiciones envía una nueva y la anterior queda
  * {@code SUPERSEDED}. Así ninguna cotización modificada puede quedar vigente sin una nueva aceptación (RF-033).
+ *
+ * <p>Como {@code ServiceCategory} en ms-users, en la API y en la base viaja el nombre de la constante en inglés; el
+ * nombre en español es solo para mostrar (DD V2: ENVIADA, ACEPTADA, RECHAZADA, VENCIDA, REEMPLAZADA).
  */
 public enum QuotationStatus {
 
     /** Enviada por el prestador seleccionado; espera la respuesta del cliente. */
-    SENT,
+    SENT("Enviada"),
 
     /** Aceptada por el cliente: sus condiciones son las que se formalizan en la contratación. */
-    ACCEPTED,
+    ACCEPTED("Aceptada"),
 
     /** Rechazada por el cliente. */
-    REJECTED,
+    REJECTED("Rechazada"),
 
     /** Pasó su vigencia sin respuesta del cliente. */
-    EXPIRED,
+    EXPIRED("Vencida"),
 
     /** Reemplazada por una cotización más reciente del mismo prestador. */
-    SUPERSEDED;
+    SUPERSEDED("Reemplazada");
+
+    private final String displayName;
+
+    QuotationStatus(String displayName) {
+        this.displayName = displayName;
+    }
+
+    /** Nombre para mostrar; en la API y en la base viaja el nombre de la constante. */
+    public String getDisplayName() {
+        return displayName;
+    }
 
     public Set<QuotationStatus> allowedTransitions() {
         return switch (this) {

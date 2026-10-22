@@ -104,6 +104,85 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/services/requests/{id}/applications:
+    get:
+      summary: Consultar los postulantes de una de mis solicitudes (GC-347)
+      description: |
+        Prestadores postulados a la solicitud y el estado de cada postulación, en orden de llegada (la primera
+        postulación primero). Sin postulantes responde `200` con `[]`. No incluye datos de la solicitud ni ubicación;
+        el perfil público del prestador se consulta aparte. Si la solicitud no existe, es de otro cliente o el
+        identificador no es un UUID, la respuesta es la misma 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Postulantes de la solicitud.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Applicant'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/services/requests/{id}/applications/{applicationId}/selection:
+    post:
+      summary: Seleccionar al prestador de una de mis solicitudes (GC-348)
+      description: |
+        Elige a un único prestador entre los postulantes. En una sola transacción la solicitud pasa a
+        `PROVIDER_SELECTED` con `selectedProviderId`, la postulación elegida a `SELECTED` y las demás a `REJECTED`.
+        La solicitud debe estar `PUBLISHED` y con el momento esperado por delante; si ya tiene prestador, se canceló
+        o su momento esperado pasó responde 409, salvo que se repita la selección sobre la postulación ya elegida:
+        entonces responde 200 con el estado actual y no cambia nada. Si la solicitud no existe o es de otro cliente (o
+        el identificador no es un UUID), la respuesta es la misma 404; una postulación que no es de esa solicitud, no
+        existe o no es un UUID responde 404 "Postulación no encontrada".
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: applicationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Solicitud con el prestador seleccionado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: La solicitud ya no admite seleccionar prestador (ya tiene otro, se canceló o su momento esperado pasó).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
   /api/services/applications:
     post:
       summary: Postularse a una solicitud disponible (GC-342)
@@ -201,33 +280,185 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /api/services/applications/opportunities:
+  /api/services/opportunities:
     get:
-      summary: Consultar mis oportunidades compatibles (GC-337)
+      summary: Consultar mis oportunidades compatibles (GC-337, GC-338)
       description: |
-        Solicitudes abiertas (`PUBLISHED` y con el momento esperado por delante) que el técnico puede atender y a las
-        que aún no se ha postulado, la más reciente primero. La compatibilidad (categoría, zona de atención y
-        disponibilidad) la decide ms-users, con la misma regla que se aplica al postularse. Devuelve como máximo 50
-        oportunidades y revisa como máximo 500 candidatas; la paginación llega con GC-338. Si ms-users no responde,
-        503 y no se devuelve nada. Solo incluye la ubicación aproximada; no incluye al cliente, la dirección exacta
-        ni las fotos.
+        Una página de solicitudes abiertas (`PUBLISHED` y con el momento esperado por delante) que el técnico puede
+        atender y a las que aún no se ha postulado, la más reciente primero. La compatibilidad (categoría, zona de
+        atención y disponibilidad) la decide ms-users, con la misma regla que se aplica al postularse.
+
+        Paginación por cursor: se pide la siguiente página con el `nextCursor` de la anterior, hasta que sea `null`.
+        Cada consulta revisa como máximo 500 candidatas; si no reúne `limit` oportunidades dentro de ese presupuesto
+        devuelve las que encontró y un `nextCursor`, de modo que una página puede traer menos de `limit` elementos,
+        incluso ninguno, y aun así tener `nextCursor`. Recorrer todas las páginas entrega todas las compatibles.
+
+        Solo incluye la ubicación aproximada; no incluye al cliente, la dirección exacta ni las fotos. Si ms-users no
+        responde, 503 y no se devuelve nada.
       security:
         - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Oportunidades que se piden como máximo en la página.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+        - name: cursor
+          in: query
+          required: false
+          description: El `nextCursor` de la página anterior. Es opaco, no se debe construir ni interpretar.
+          schema:
+            type: string
       responses:
         '200':
-          description: Oportunidades compatibles (puede ser una lista vacía).
+          description: Una página de oportunidades compatibles (puede estar vacía).
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Opportunity'
+                $ref: '#/components/schemas/OpportunityPage'
+        '400':
+          description: El límite o el cursor no son válidos.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
         '503':
           description: No fue posible verificar la elegibilidad con ms-users.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/services/requests/{id}/quotations:
+    get:
+      summary: Cotizaciones recibidas en una de mis solicitudes (GC-354)
+      description: |
+        Solo `ROLE_CLIENT`. La más reciente primero. Si la solicitud no existe o es de otro cliente (o el identificador
+        no es un UUID), la respuesta es la misma 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Cotizaciones de la solicitud.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Quotation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/services/quotations:
+    post:
+      summary: Crear y enviar una cotización (GC-354)
+      description: |
+        Solo `ROLE_PROFESSIONAL`; el prestador sale del token. Debe ser el prestador seleccionado de una solicitud en
+        `PROVIDER_SELECTED`. La cotización queda `SENT`; si había otra `SENT` en la solicitud, queda `SUPERSEDED` (o
+        `EXPIRED` si ya había vencido). Todo ocurre con la solicitud bloqueada.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateQuotation'
+      responses:
+        '201':
+          description: Cotización enviada. La cabecera `Location` apunta a la cotización.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Quotation'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: |
+            "Cotización no permitida": el prestador no tiene una selección vigente en la solicitud, o la solicitud ya
+            tiene una cotización aceptada.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+    get:
+      summary: Listar mis cotizaciones (GC-354)
+      description: Cotizaciones del prestador autenticado, la más reciente primero.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: serviceRequestId
+          in: query
+          required: false
+          description: Solo las de esta solicitud.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Cotizaciones del prestador.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Quotation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/services/quotations/{quotationId}:
+    get:
+      summary: Consultar una de mis cotizaciones (GC-354)
+      description: Si no existe, es de otro prestador o el identificador no es un UUID, la respuesta es la misma 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: quotationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Cotización del prestador.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Quotation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Cotización no encontrada.
           content:
             application/problem+json:
               schema:
@@ -263,6 +494,7 @@ components:
             status: 401
             detail: Se requiere autenticación válida
             instance: /api/services/requests
+
     Forbidden:
       description: Sesión válida, pero el rol no permite la acción (por ejemplo, un técnico en una ruta de cliente).
       content:
@@ -275,6 +507,7 @@ components:
             status: 403
             detail: Su rol no permite realizar esta acción
             instance: /api/services/requests
+
     NotFound:
       description: La solicitud no existe o no pertenece al cliente autenticado.
       content:
@@ -286,6 +519,7 @@ components:
             title: Solicitud no encontrada
             status: 404
             detail: No existe la solicitud indicada
+
     ValidationError:
       description: Datos inválidos o faltantes; `errors` indica qué corregir.
       content:
@@ -411,6 +645,29 @@ components:
             longitude: { type: number, nullable: true }
             expectedAt: { type: string, format: date-time }
 
+    OpportunityPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Opportunity'
+        nextCursor:
+          type: string
+          nullable: true
+          description: Cursor para pedir la siguiente página; `null` si no quedan más candidatas.
+
+    Applicant:
+      type: object
+      description: Postulante a una solicitud, tal como lo ve el cliente dueño.
+      properties:
+        id: { type: string, format: uuid, description: Identificador de la postulación. }
+        providerId: { type: string, format: uuid, description: Identificador del prestador en ms-users. }
+        status: { $ref: '#/components/schemas/ApplicationStatus' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
     Opportunity:
       type: object
       description: Solicitud compatible con el técnico. Solo ubicación aproximada.
@@ -424,6 +681,44 @@ components:
         longitude: { type: number, nullable: true }
         expectedAt: { type: string, format: date-time }
         publishedAt: { type: string, format: date-time }
+
+    QuotationStatus:
+      type: string
+      enum: [SENT, ACCEPTED, REJECTED, EXPIRED, SUPERSEDED]
+      description: |
+        Código del estado (en inglés, como el resto de la API). Su nombre en español viaja en `statusName`:
+        Enviada, Aceptada, Rechazada, Vencida, Reemplazada.
+
+    CreateQuotation:
+      type: object
+      required: [serviceRequestId, amount, currency, scope, conditions, agreedAt, validUntil]
+      properties:
+        serviceRequestId: { type: string, format: uuid }
+        amount: { type: number, minimum: 0, exclusiveMinimum: true, example: 150000.00, description: Hasta dos decimales. }
+        currency: { type: string, enum: [COP] }
+        scope: { type: string, maxLength: 2000 }
+        conditions: { type: string, maxLength: 2000 }
+        agreedAt: { type: string, format: date-time, description: Fecha acordada para el servicio; posterior al envío. }
+        validUntil: { type: string, format: date-time, description: Vigencia; posterior al envío y no posterior a agreedAt. }
+
+    Quotation:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        serviceRequestId: { type: string, format: uuid }
+        providerId: { type: string, format: uuid, description: Identificador del prestador en ms-users. }
+        amount: { type: number, example: 150000.00 }
+        currency: { type: string, enum: [COP] }
+        scope: { type: string }
+        conditions: { type: string }
+        agreedAt: { type: string, format: date-time }
+        validUntil: { type: string, format: date-time }
+        status: { $ref: '#/components/schemas/QuotationStatus' }
+        statusName: { type: string, example: Enviada, description: Nombre del estado en español, para mostrar. }
+        expired: { type: boolean, description: Sigue SENT pero su vigencia ya pasó; no se puede aceptar. }
+        respondedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
 
     NotEligibleProblem:
       allOf:
