@@ -84,9 +84,14 @@ public class ServiceRequestApplication {
      * @throws ServiceRequestNotAvailableException si no es así
      */
     public static void requireOpen(ServiceRequest request, Instant now) {
-        if (request.getStatus() != ServiceRequestStatus.PUBLISHED || !request.getExpectedAt().isAfter(now)) {
+        if (!isOpen(request, now)) {
             throw new ServiceRequestNotAvailableException();
         }
+    }
+
+    /** Publicada y con el momento esperado por delante: la misma regla para postularse y para seleccionar (GC-348). */
+    public static boolean isOpen(ServiceRequest request, Instant now) {
+        return request.getStatus() == ServiceRequestStatus.PUBLISHED && request.getExpectedAt().isAfter(now);
     }
 
     /** El cliente eligió a este prestador (GC-348). */

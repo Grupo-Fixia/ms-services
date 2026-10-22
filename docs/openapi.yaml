@@ -137,6 +137,52 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/services/requests/{id}/applications/{applicationId}/selection:
+    post:
+      summary: Seleccionar al prestador de una de mis solicitudes (GC-348)
+      description: |
+        Elige a un único prestador entre los postulantes. En una sola transacción la solicitud pasa a
+        `PROVIDER_SELECTED` con `selectedProviderId`, la postulación elegida a `SELECTED` y las demás a `REJECTED`.
+        La solicitud debe estar `PUBLISHED` y con el momento esperado por delante; si ya tiene prestador, se canceló
+        o su momento esperado pasó responde 409, salvo que se repita la selección sobre la postulación ya elegida:
+        entonces responde 200 con el estado actual y no cambia nada. Si la solicitud no existe o es de otro cliente (o
+        el identificador no es un UUID), la respuesta es la misma 404; una postulación que no es de esa solicitud, no
+        existe o no es un UUID responde 404 "Postulación no encontrada".
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: applicationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Solicitud con el prestador seleccionado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: La solicitud ya no admite seleccionar prestador (ya tiene otro, se canceló o su momento esperado pasó).
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
   /api/services/applications:
     post:
       summary: Postularse a una solicitud disponible (GC-342)

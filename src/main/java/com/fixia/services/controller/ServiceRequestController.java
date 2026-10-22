@@ -65,6 +65,16 @@ public class ServiceRequestController {
     }
 
     /**
+     * Elige al prestador de la solicitud entre sus postulantes (GC-348). Devuelve la solicitud ya en
+     * {@code PROVIDER_SELECTED}; los estados de las postulaciones se consultan en {@code /applications}.
+     */
+    @PostMapping("/{id}/applications/{applicationId}/selection")
+    public ServiceRequestResponse selectProvider(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+                                                 @PathVariable UUID applicationId) {
+        return ServiceRequestResponse.from(service.selectProvider(clientId(jwt), id, applicationId));
+    }
+
+    /**
      * Si el "sub" no tiene el formato esperado la sesión se trata como inválida: la excepción de
      * autenticación llega al mismo 401 que cualquier otro token inválido.
      */
