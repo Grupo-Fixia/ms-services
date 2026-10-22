@@ -104,6 +104,39 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/services/requests/{id}/applications:
+    get:
+      summary: Consultar los postulantes de una de mis solicitudes (GC-347)
+      description: |
+        Prestadores postulados a la solicitud y el estado de cada postulación, en orden de llegada (la primera
+        postulación primero). Sin postulantes responde `200` con `[]`. No incluye datos de la solicitud ni ubicación;
+        el perfil público del prestador se consulta aparte. Si la solicitud no existe, es de otro cliente o el
+        identificador no es un UUID, la respuesta es la misma 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Postulantes de la solicitud.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Applicant'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/services/applications:
     post:
       summary: Postularse a una solicitud disponible (GC-342)
@@ -263,6 +296,7 @@ components:
             status: 401
             detail: Se requiere autenticación válida
             instance: /api/services/requests
+
     Forbidden:
       description: Sesión válida, pero el rol no permite la acción (por ejemplo, un técnico en una ruta de cliente).
       content:
@@ -275,6 +309,7 @@ components:
             status: 403
             detail: Su rol no permite realizar esta acción
             instance: /api/services/requests
+
     NotFound:
       description: La solicitud no existe o no pertenece al cliente autenticado.
       content:
@@ -286,6 +321,7 @@ components:
             title: Solicitud no encontrada
             status: 404
             detail: No existe la solicitud indicada
+
     ValidationError:
       description: Datos inválidos o faltantes; `errors` indica qué corregir.
       content:
@@ -410,6 +446,16 @@ components:
             latitude: { type: number, nullable: true }
             longitude: { type: number, nullable: true }
             expectedAt: { type: string, format: date-time }
+
+    Applicant:
+      type: object
+      description: Postulante a una solicitud, tal como lo ve el cliente dueño.
+      properties:
+        id: { type: string, format: uuid, description: Identificador de la postulación. }
+        providerId: { type: string, format: uuid, description: Identificador del prestador en ms-users. }
+        status: { $ref: '#/components/schemas/ApplicationStatus' }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
 
     Opportunity:
       type: object

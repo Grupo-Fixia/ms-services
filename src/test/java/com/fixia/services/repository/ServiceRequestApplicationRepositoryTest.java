@@ -92,7 +92,7 @@ class ServiceRequestApplicationRepositoryTest {
 
         assertThat(applicationRepository.findByProviderIdOrderByCreatedAtDesc(PROVIDER))
                 .extracting(ServiceRequestApplication::getId).containsExactly(newer.getId(), older.getId());
-        assertThat(applicationRepository.findByServiceRequestIdOrderByCreatedAtAsc(first.getId()))
+        assertThat(applicationRepository.findByServiceRequestIdOrderByCreatedAtAscIdAsc(first.getId()))
                 .extracting(ServiceRequestApplication::getId).containsExactly(older.getId(), fromOther.getId());
         assertThat(applicationRepository.findByIdAndProviderId(older.getId(), PROVIDER)).isPresent();
         assertThat(applicationRepository.findByIdAndProviderId(fromOther.getId(), PROVIDER)).isEmpty();
