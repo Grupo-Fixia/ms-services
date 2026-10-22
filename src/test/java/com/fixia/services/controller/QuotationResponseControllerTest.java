@@ -9,6 +9,7 @@ import com.fixia.services.domain.ServiceCategory;
 import com.fixia.services.domain.ServiceRequest;
 import com.fixia.services.domain.ServiceRequestStatus;
 import com.fixia.services.repository.QuotationRepository;
+import com.fixia.services.repository.ServiceContractRepository;
 import com.fixia.services.repository.ServiceRequestApplicationRepository;
 import com.fixia.services.repository.ServiceRequestRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -72,8 +73,12 @@ class QuotationResponseControllerTest {
     @Autowired
     private QuotationRepository quotationRepository;
 
+    @Autowired
+    private ServiceContractRepository contractRepository;
+
     @BeforeEach
     void cleanDatabase() {
+        contractRepository.deleteAllInBatch();
         quotationRepository.deleteAllInBatch();
         applicationRepository.deleteAllInBatch();
         serviceRequestRepository.deleteAllInBatch();
@@ -183,15 +188,17 @@ class QuotationResponseControllerTest {
     }
 
     @Test
-    void aceptarNoContrataLaSolicitudQuedaConSuPrestadorSeleccionado() throws Exception {
+    void aceptarContrataLaSolicitudYGuardaLoAcordado() throws Exception {
         ServiceRequest request = selectedRequest(CLIENT, PROVIDER);
         Quotation quotation = sent(request);
 
         accept(CLIENT, request.getId(), quotation.getId()).andExpect(status().isOk());
 
+        // GC-359: aceptar formaliza la contratación en la misma transacción.
         ServiceRequest saved = serviceRequestRepository.findById(request.getId()).orElseThrow();
-        assertThat(saved.getStatus()).isEqualTo(ServiceRequestStatus.PROVIDER_SELECTED);
+        assertThat(saved.getStatus()).isEqualTo(ServiceRequestStatus.CONTRACTED);
         assertThat(saved.getSelectedProviderId()).isEqualTo(PROVIDER);
+        assertThat(contractRepository.findByServiceRequestId(request.getId())).isPresent();
     }
 
     @Test
@@ -255,8 +262,10 @@ class QuotationResponseControllerTest {
     @Test
     void siYaHayOtraAceptadaNoSeAceptaUnaSegunda() throws Exception {
         ServiceRequest request = selectedRequest(CLIENT, PROVIDER);
+        // Dato anterior a GC-359: una aceptada que no llegó a contratarse (la solicitud sigue con su prestador).
         Quotation accepted = sent(request);
-        accept(CLIENT, request.getId(), accepted.getId()).andExpect(status().isOk());
+        accepted.accept(Instant.now());
+        quotationRepository.saveAndFlush(accepted);
         // Caso defensivo: aunque el envío ya lo impide, una segunda enviada no debe poder aceptarse.
         Quotation another = quotationRepository.saveAndFlush(Quotation.send(request, PROVIDER, new BigDecimal("5000"),
                 CurrencyCode.COP, "Otra", "Otra", Instant.now().plus(Duration.ofHours(3)),
@@ -350,13 +359,14 @@ class QuotationResponseControllerTest {
         ServiceRequest request = selectedRequest(CLIENT, PROVIDER);
         Quotation quotation = sent(request);
         accept(CLIENT, request.getId(), quotation.getId()).andExpect(status().isOk());
-        ServiceRequest saved = serviceRequestRepository.findById(request.getId()).orElseThrow();
-        saved.contract(Instant.now());
-        serviceRequestRepository.saveAndFlush(saved);
+        assertThat(serviceRequestRepository.findById(request.getId()).orElseThrow().getStatus())
+                .isEqualTo(ServiceRequestStatus.CONTRACTED);
 
         accept(CLIENT, request.getId(), quotation.getId())
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("ACCEPTED"));
+
+        assertThat(contractRepository.count()).isEqualTo(1);
     }
 
     // ---------- Quién puede responder y sobre qué ----------
