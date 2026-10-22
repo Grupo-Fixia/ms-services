@@ -3,9 +3,7 @@ package com.fixia.services.controller;
 import com.fixia.services.domain.ServiceRequestApplication;
 import com.fixia.services.dto.ApplicationResponse;
 import com.fixia.services.dto.CreateApplicationRequest;
-import com.fixia.services.dto.OpportunityResponse;
 import com.fixia.services.service.ApplicationService;
-import com.fixia.services.service.OpportunityService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -35,11 +33,9 @@ public class ApplicationController {
     private static final String SUBJECT_PREFIX = "usr_";
 
     private final ApplicationService service;
-    private final OpportunityService opportunities;
 
-    public ApplicationController(ApplicationService service, OpportunityService opportunities) {
+    public ApplicationController(ApplicationService service) {
         this.service = service;
-        this.opportunities = opportunities;
     }
 
     @PostMapping
@@ -58,15 +54,6 @@ public class ApplicationController {
         return service.listMine(providerId(jwt)).stream()
                 .map(view -> ApplicationResponse.from(view.application(), view.request()))
                 .toList();
-    }
-
-    /**
-     * Solicitudes compatibles con el técnico a las que aún puede postularse (GC-337): categoría, zona y disponibilidad
-     * los decide ms-users. La ruta fija tiene prioridad sobre {@code /{id}}.
-     */
-    @GetMapping("/opportunities")
-    public List<OpportunityResponse> opportunities(@AuthenticationPrincipal Jwt jwt) {
-        return opportunities.findFor(providerId(jwt)).stream().map(OpportunityResponse::from).toList();
     }
 
     @GetMapping("/{id}")

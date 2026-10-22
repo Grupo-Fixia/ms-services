@@ -26,9 +26,10 @@ public interface ServiceRequestRepository extends JpaRepository<ServiceRequest, 
     List<ServiceRequest> findByClientIdOrderByPublishedAtDesc(UUID clientId);
 
     /**
-     * Candidatas a oportunidad de un técnico (GC-337): solicitudes publicadas, con el momento esperado por delante y a
-     * las que el técnico aún no se ha postulado, la más reciente primero. Es solo la preselección: si el técnico puede
-     * atenderlas (categoría, zona y disponibilidad) lo decide ms-users. Sin fotos: no se mezclan con la paginación.
+     * Candidatas a oportunidad de un técnico (GC-337, GC-338): solicitudes publicadas, con el momento esperado por
+     * delante y a las que el técnico aún no se ha postulado, la más reciente primero (empates por {@code id}). Es solo la
+     * preselección: si el técnico puede atenderlas (categoría, zona y disponibilidad) lo decide ms-users. Sin fotos: no
+     * se mezclan con la paginación. La primera página; las siguientes, con {@link #findOpenWithoutApplicationAfter}.
      */
     @Query("""
             select r from ServiceRequest r
@@ -40,6 +41,26 @@ public interface ServiceRequestRepository extends JpaRepository<ServiceRequest, 
             """)
     Slice<ServiceRequest> findOpenWithoutApplicationFrom(@Param("providerId") UUID providerId,
                                                          @Param("now") Instant now, Pageable pageable);
+
+    /**
+     * Las candidatas estrictamente posteriores en el orden a la clave {@code (cursorPublishedAt, cursorId)}. Paginación
+     * por claves, no por desplazamiento: nada se repite ni se salta aunque lleguen solicitudes nuevas entre páginas. Es
+     * un método aparte y no un parámetro nulo porque PostgreSQL no infiere el tipo de un {@code null} sin tipo.
+     */
+    @Query("""
+            select r from ServiceRequest r
+            where r.status = com.fixia.services.domain.ServiceRequestStatus.PUBLISHED
+              and r.expectedAt > :now
+              and not exists (select 1 from ServiceRequestApplication a
+                              where a.serviceRequestId = r.id and a.providerId = :providerId)
+              and (r.publishedAt < :cursorPublishedAt
+                   or (r.publishedAt = :cursorPublishedAt and r.id < :cursorId))
+            order by r.publishedAt desc, r.id desc
+            """)
+    Slice<ServiceRequest> findOpenWithoutApplicationAfter(@Param("providerId") UUID providerId,
+                                                          @Param("now") Instant now,
+                                                          @Param("cursorPublishedAt") Instant cursorPublishedAt,
+                                                          @Param("cursorId") UUID cursorId, Pageable pageable);
 
     /**
      * Para escribir: toma la fila de la solicitud en exclusiva hasta el fin de la transacción, de modo que una

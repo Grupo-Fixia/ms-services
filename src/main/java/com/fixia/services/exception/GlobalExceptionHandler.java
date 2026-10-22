@@ -63,6 +63,13 @@ public class GlobalExceptionHandler {
         return problem;
     }
 
+    @ExceptionHandler(InvalidOpportunityQueryException.class)
+    public ProblemDetail handleInvalidOpportunityQuery(InvalidOpportunityQueryException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Consulta inválida");
+        return problem;
+    }
+
     @ExceptionHandler(ServiceRequestNotAvailableException.class)
     public ProblemDetail handleRequestNotAvailable(ServiceRequestNotAvailableException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());

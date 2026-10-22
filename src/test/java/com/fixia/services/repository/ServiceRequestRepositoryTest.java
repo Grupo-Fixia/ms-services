@@ -234,24 +234,52 @@ class ServiceRequestRepositoryTest {
     }
 
     @Test
-    void laConsultaDeCandidatasPaginaSinRepetirNiSaltarSolicitudes() {
+    void laPaginacionPorCursorNoRepiteNiSaltaSolicitudesNiSiquieraConElMismoInstante() {
         Instant now = now();
-        List<UUID> expected = new ArrayList<>();
-        for (int i = 0; i < 5; i++) {
-            expected.add(0, published(now.minusSeconds(100 - i), now.plus(Duration.ofDays(1))).getId());
+        // Siete solicitudes: tres comparten instante (desempata el id) y las demás son distintas.
+        Instant shared = now.minusSeconds(100);
+        List<Instant> publishedAt = List.of(shared, shared, shared, now.minusSeconds(90), now.minusSeconds(80),
+                now.minusSeconds(70), now.minusSeconds(60));
+        publishedAt.forEach(at -> published(at, now.plus(Duration.ofDays(1))));
+        List<ServiceRequest> fullOrder =
+                repository.findOpenWithoutApplicationFrom(PROVIDER, now, PageRequest.of(0, 50)).getContent();
+        assertThat(fullOrder).hasSize(7);
+        assertThat(fullOrder).extracting(ServiceRequest::getPublishedAt).isSortedAccordingTo(
+                java.util.Comparator.reverseOrder());
+
+        List<UUID> walked = new ArrayList<>();
+        Slice<ServiceRequest> page = repository.findOpenWithoutApplicationFrom(PROVIDER, now, PageRequest.of(0, 2));
+        int pages = 1;
+        while (true) {
+            page.forEach(request -> walked.add(request.getId()));
+            if (!page.hasNext()) {
+                break;
+            }
+            ServiceRequest last = page.getContent().get(page.getContent().size() - 1);
+            page = repository.findOpenWithoutApplicationAfter(PROVIDER, now, last.getPublishedAt(), last.getId(),
+                    PageRequest.of(0, 2));
+            pages++;
         }
 
-        Slice<ServiceRequest> first = repository.findOpenWithoutApplicationFrom(PROVIDER, now, PageRequest.of(0, 2));
-        Slice<ServiceRequest> second = repository.findOpenWithoutApplicationFrom(PROVIDER, now, first.nextPageable());
-        Slice<ServiceRequest> third = repository.findOpenWithoutApplicationFrom(PROVIDER, now, second.nextPageable());
+        assertThat(walked).containsExactlyElementsOf(fullOrder.stream().map(ServiceRequest::getId).toList());
+        assertThat(pages).isEqualTo(4);
+    }
 
-        assertThat(first.hasNext()).isTrue();
-        assertThat(second.hasNext()).isTrue();
-        assertThat(third.hasNext()).isFalse();
-        List<UUID> all = new ArrayList<>();
-        for (Slice<ServiceRequest> page : List.of(first, second, third)) {
-            page.forEach(request -> all.add(request.getId()));
-        }
-        assertThat(all).containsExactlyElementsOf(expected);
+    @Test
+    void despuesDelCursorSoloQuedanLasEstrictamenteAnterioresYSeSiguenAplicandoLasExclusiones() {
+        Instant now = now();
+        ServiceRequest newest = published(now.minusSeconds(10), now.plus(Duration.ofDays(1)));
+        ServiceRequest middle = published(now.minusSeconds(20), now.plus(Duration.ofDays(1)));
+        ServiceRequest applied = published(now.minusSeconds(30), now.plus(Duration.ofDays(1)));
+        ServiceRequest oldest = published(now.minusSeconds(40), now.plus(Duration.ofDays(1)));
+        published(now.minusSeconds(35), now.minusSeconds(1));
+        applicationRepository.saveAndFlush(ServiceRequestApplication.submit(applied, PROVIDER, now));
+
+        Slice<ServiceRequest> after = repository.findOpenWithoutApplicationAfter(PROVIDER, now,
+                newest.getPublishedAt(), newest.getId(), PageRequest.of(0, 10));
+
+        assertThat(after.getContent()).extracting(ServiceRequest::getId).containsExactly(middle.getId(), oldest.getId());
+        assertThat(repository.findOpenWithoutApplicationAfter(PROVIDER, now, oldest.getPublishedAt(), oldest.getId(),
+                PageRequest.of(0, 10)).getContent()).isEmpty();
     }
 }
