@@ -236,8 +236,32 @@ SENT -> ACCEPTED | REJECTED | EXPIRED | SUPERSEDED
   409 "Cotización no permitida". Repetir la misma respuesta devuelve 200 con el estado actual sin cambiar nada. Se hace
   con la solicitud bloqueada (`FOR UPDATE`, la misma fila que el envío, la postulación y la selección), así que dos
   respuestas simultáneas, o una respuesta y un envío nuevo, no se cruzan.
-- **Aceptar no contrata.** La solicitud sigue en `PROVIDER_SELECTED` con su prestador; formalizar la contratación (estado
-  `CONTRACTED` y dirección exacta) es GC-359, que se engancha en la misma transacción. Rechazar tampoco cambia la
-  solicitud: el prestador puede enviar otra cotización.
+- **Aceptar contrata (GC-359).** Al aceptar, en la misma transacción, la solicitud pasa a `CONTRACTED` y se guarda la
+  contratación con una copia de lo acordado (ver «Contratación»); si algo falla, la cotización sigue enviada. Rechazar no
+  cambia la solicitud: el prestador puede enviar otra cotización.
 - El evento `cotizacion.enviada` (ADR-024, outbox) queda pendiente: el servicio todavía
   no tiene tabla OUTBOX ni publicador.
+
+## Contratación (GC-359)
+
+`ServiceContract` (tabla `service_contracts`, migración V5) nace en la misma transacción en que el cliente acepta una
+cotización vigente (RF-035, CA-03) y guarda una **copia inmutable** de lo acordado: valor (`NUMERIC(12,2)`, `COP`), alcance,
+condiciones y fecha del servicio, más los ids de solicitud, cotización, cliente y prestador (sin FK a ms-users). El pago del
+servicio ocurre fuera de Fixia (RN-005, RN-006, CA-04): no hay columnas de saldo, retención ni pago. El estado del servicio es el
+de la solicitud (`CONTRACTED`); no se duplica en la contratación.
+
+- Una contratación por solicitud y una por cotización (restricciones únicas); se borra con la solicitud.
+- Al aceptar se valida, con la solicitud bloqueada, que la cotización esté `SENT`, vigente y sea la del prestador seleccionado.
+- **Reparación:** si una cotización aceptada con GC-358 (antes de GC-359) quedó sin contratar, repetir la aceptación completa
+  la contratación y responde 200.
+- La **dirección exacta** solo existe con la solicitud contratada (ADR-009): la recibe el cliente (`GET /requests/{id}`) y el
+  prestador contratado, únicamente por la contratación.
+
+| Método y ruta | Rol | Descripción |
+|---|---|---|
+| `GET /api/services/requests/{id}/contract` | `ROLE_CLIENT` | La contratación de mi solicitud; 404 si no existe, es de otro cliente o aún no se contrató |
+| `GET /api/services/contracts` | `ROLE_PROFESSIONAL` | Mis contrataciones, la más reciente primero |
+| `GET /api/services/contracts/{contractId}` | `ROLE_PROFESSIONAL` | Una de mis contrataciones; 404 si es de otro prestador |
+
+La respuesta (`Contract`) trae lo acordado y un resumen de la solicitud con `exactLocation`; no trae datos de contacto (el
+cliente y el prestador llegan como UUID de ms-users).

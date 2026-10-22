@@ -372,13 +372,17 @@ paths:
     post:
       summary: Aceptar una cotización de una de mis solicitudes (GC-358)
       description: |
-        Solo `ROLE_CLIENT`. El cliente acepta la cotización: queda en `ACCEPTED` con `respondedAt`.
+        Solo `ROLE_CLIENT`. El cliente acepta la cotización: queda en `ACCEPTED` con `respondedAt` y, **en la misma transacción**,
+        Fixia formaliza la contratación (GC-359, CA-03): la solicitud pasa a `CONTRACTED`, se guarda una copia de lo acordado
+        (consultable en `GET /api/services/requests/{id}/contract` y `GET /api/services/contracts/{id}`) y desde ese momento la
+        dirección exacta se entrega al cliente y al prestador contratado. Si algo falla, no queda nada a medias.
         La solicitud debe ser del cliente y tener prestador seleccionado (`PROVIDER_SELECTED`), y la cotización debe ser de esa
         solicitud, del prestador seleccionado, estar `SENT` y vigente (no vencida). Una cotización rechazada, reemplazada por otra o vencida no se acepta (RF-033).
         Si la solicitud no existe o es de otro cliente (o el identificador no es un UUID), la respuesta es la misma 404; una
         cotización que no es de esa solicitud, no existe o no es un UUID responde 404 "Cotización no encontrada". Si se repite
-        la misma respuesta sobre una cotización que ya quedó así, responde 200 con el estado actual y no cambia nada. La
-        solicitud no cambia de estado: formalizar la contratación es GC-359.
+        la misma respuesta sobre una cotización que ya quedó así, responde 200 con el estado actual y no cambia nada (y, si una
+        cotización aceptada antes de GC-359 había quedado sin contratar, repetir la aceptación completa la contratación). El
+        pago del servicio ocurre fuera de Fixia: no se crea saldo, retención ni pago.
       security:
         - bearerAuth: []
       parameters:
@@ -396,7 +400,7 @@ paths:
             format: uuid
       responses:
         '200':
-          description: Cotización aceptada.
+          description: Cotización aceptada; la solicitud queda contratada.
           content:
             application/json:
               schema:
@@ -424,7 +428,7 @@ paths:
         Si la solicitud no existe o es de otro cliente (o el identificador no es un UUID), la respuesta es la misma 404; una
         cotización que no es de esa solicitud, no existe o no es un UUID responde 404 "Cotización no encontrada". Si se repite
         la misma respuesta sobre una cotización que ya quedó así, responde 200 con el estado actual y no cambia nada. La
-        solicitud no cambia de estado: formalizar la contratación es GC-359.
+        solicitud no cambia de estado: el prestador seleccionado puede enviar otra cotización.
       security:
         - bearerAuth: []
       parameters:
@@ -459,6 +463,88 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+
+  /api/services/requests/{id}/contract:
+    get:
+      summary: Contratación de una de mis solicitudes (GC-359)
+      description: |
+        Solo `ROLE_CLIENT`. La contratación que nació al aceptar una cotización: lo acordado (valor, moneda, alcance,
+        condiciones y fecha del servicio) y un resumen de la solicitud con su dirección exacta. Si la solicitud no existe o es
+        de otro cliente (o el identificador no es un UUID), la respuesta es la misma 404; si todavía no se contrató, 404
+        "Contratación no encontrada".
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Contratación de la solicitud.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/services/contracts:
+    get:
+      summary: Mis contrataciones como prestador (GC-359)
+      description: |
+        Solo `ROLE_PROFESSIONAL`. Las contrataciones del prestador autenticado, la más reciente primero. Es el camino por el que
+        el prestador recibe la dirección exacta de la solicitud que contrató (ADR-009): solo existe con la solicitud contratada.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Contrataciones del prestador.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Contract'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/services/contracts/{contractId}:
+    get:
+      summary: Una de mis contrataciones como prestador (GC-359)
+      description: |
+        Solo `ROLE_PROFESSIONAL`. Si la contratación no existe, es de otro prestador o el identificador no es un UUID, la
+        respuesta es la misma 404 "Contratación no encontrada".
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: La contratación, con la dirección exacta.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/services/quotations:
     post:
@@ -811,6 +897,45 @@ components:
         respondedAt: { type: string, format: date-time, nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+
+    Contract:
+      type: object
+      description: |
+        Contratación formalizada al aceptar una cotización (GC-359): copia inmutable de lo acordado. No trae datos de contacto
+        ni de pago: el pago ocurre fuera de Fixia.
+      properties:
+        id: { type: string, format: uuid }
+        serviceRequestId: { type: string, format: uuid }
+        quotationId: { type: string, format: uuid }
+        clientId: { type: string, format: uuid, description: Identificador del cliente en ms-users. }
+        providerId: { type: string, format: uuid, description: Identificador del prestador en ms-users. }
+        amount: { type: number, example: 150000.00 }
+        currency: { type: string, enum: [COP] }
+        scope: { type: string }
+        conditions: { type: string }
+        agreedAt: { type: string, format: date-time, description: Fecha acordada para el servicio. }
+        contractedAt: { type: string, format: date-time }
+        serviceRequest:
+          type: object
+          properties:
+            category: { $ref: '#/components/schemas/ServiceCategory' }
+            description: { type: string }
+            status: { $ref: '#/components/schemas/ServiceRequestStatus' }
+            approximateLocation:
+              type: object
+              properties:
+                city: { type: string }
+                zone: { type: string }
+                latitude: { type: number, format: double, nullable: true }
+                longitude: { type: number, format: double, nullable: true }
+            exactLocation:
+              type: object
+              description: Presente porque la solicitud ya está `CONTRACTED`, si el cliente indicó una dirección.
+              properties:
+                address: { type: string }
+                latitude: { type: number, format: double, nullable: true }
+                longitude: { type: number, format: double, nullable: true }
+            expectedAt: { type: string, format: date-time }
 
     NotEligibleProblem:
       allOf:
