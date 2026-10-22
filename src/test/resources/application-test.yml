@@ -1,0 +1,10 @@
+spring:
+  datasource:
+    url: jdbc:h2:mem:services-test;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DEFAULT_NULL_ORDERING=HIGH;DB_CLOSE_DELAY=-1
+    username: sa
+    password: ""
+    driver-class-name: org.h2.Driver
+
+fixia:
+  users:
+    internal-api-key: clave-interna-de-prueba

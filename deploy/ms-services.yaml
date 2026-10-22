@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ms-services
+  namespace: apps
+  labels:
+    app: ms-services
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ms-services
+  template:
+    metadata:
+      labels:
+        app: ms-services
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app: ms-services
+      containers:
+        - name: ms-services
+          image: ${IMAGE}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: SPRING_DATASOURCE_URL
+              value: "jdbc:postgresql://postgres.data.svc.cluster.local:5432/ms_services"
+            - name: SPRING_DATASOURCE_USERNAME
+              value: "ms_services"
+            - name: USERS_BASE_URL
+              value: "http://ms-users:8080"
+          envFrom:
+            - secretRef:
+                name: ms-services-secrets
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 768Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ms-services
+  namespace: apps
+  labels:
+    app: ms-services
+spec:
+  selector:
+    app: ms-services
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ms-services
+  namespace: apps
+  annotations:
+    traefik.ingress.kubernetes.io/router.priority: "20"
+spec:
+  ingressClassName: traefik
+  rules:
+    - http:
+        paths:
+          - path: /api/services
+            pathType: Prefix
+            backend:
+              service:
+                name: ms-services
+                port:
+                  number: 8080
