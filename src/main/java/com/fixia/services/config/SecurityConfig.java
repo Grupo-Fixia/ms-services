@@ -23,7 +23,7 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/actuator/health/**").permitAll()
+                        .requestMatchers("/actuator/health/**", "/actuator/prometheus", "/actuator/metrics/**").permitAll()
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/api/services/requests/**").hasAuthority("ROLE_CLIENT")
                         .requestMatchers("/api/services/applications/**").hasAuthority("ROLE_PROFESSIONAL")

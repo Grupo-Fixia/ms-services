@@ -97,3 +97,20 @@ spec:
                 name: ms-services
                 port:
                   number: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ms-services-metrics
+  namespace: apps
+  labels:
+    app: ms-services
+spec:
+  type: LoadBalancer
+  selector:
+    app: ms-services
+  ports:
+    - name: metrics
+      port: 9102
+      targetPort: 8080
+
