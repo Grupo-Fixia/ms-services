@@ -206,7 +206,7 @@ SENT -> ACCEPTED | REJECTED | EXPIRED | SUPERSEDED
 - A lo sumo una cotización `SENT` y ninguna nueva si ya hay una `ACCEPTED` por solicitud: lo controla la API
   (GC-354) con la solicitud bloqueada, porque H2 no admite índices únicos parciales.
 
-## API de cotizaciones (GC-354)
+## API de cotizaciones (GC-354, GC-358)
 
 | Método y ruta | Rol | Descripción |
 |---|---|---|
@@ -214,6 +214,8 @@ SENT -> ACCEPTED | REJECTED | EXPIRED | SUPERSEDED
 | `GET /api/services/quotations` | `ROLE_PROFESSIONAL` | Mis cotizaciones, la más reciente primero; filtro opcional `?serviceRequestId=` |
 | `GET /api/services/quotations/{quotationId}` | `ROLE_PROFESSIONAL` | Una de mis cotizaciones; 404 si no existe o es de otro prestador |
 | `GET /api/services/requests/{id}/quotations` | `ROLE_CLIENT` | Cotizaciones recibidas en mi solicitud, la más reciente primero |
+| `POST /api/services/requests/{id}/quotations/{quotationId}/acceptance` | `ROLE_CLIENT` | El cliente acepta una cotización vigente (200, `ACCEPTED`) |
+| `POST /api/services/requests/{id}/quotations/{quotationId}/rejection` | `ROLE_CLIENT` | El cliente rechaza una cotización vigente (200, `REJECTED`) |
 
 - Cuerpo del `POST`: `serviceRequestId`, `amount` (mayor que cero, dos decimales), `currency` (`COP`), `scope`,
   `conditions` (hasta 2000 caracteres), `agreedAt` y `validUntil` (ISO-8601). El prestador sale del token.
@@ -227,5 +229,15 @@ SENT -> ACCEPTED | REJECTED | EXPIRED | SUPERSEDED
   dos envíos simultáneos no dejan dos vigentes.
 - **Vencimiento.** La respuesta trae `expired: true` cuando la cotización sigue `SENT` pero su vigencia ya pasó; no se
   puede aceptar. Ningún proceso la pasa todavía a `EXPIRED` por sí solo.
-- Aceptar o rechazar es GC-358. El evento `cotizacion.enviada` (ADR-024, outbox) queda pendiente: el servicio todavía
+- **Aceptar o rechazar (GC-358).** Responde el cliente dueño de la solicitud (otro cliente o una cotización de otra solicitud
+  da la misma 404; el prestador, 403). Solo se responde una cotización `SENT` y vigente, de la solicitud en
+  `PROVIDER_SELECTED` y del prestador seleccionado; una rechazada, reemplazada, vencida o ya respondida de otra forma da
+  409 "Cambio de estado no permitido" (RF-033), y si la solicitud ya no tiene prestador vigente o ya hay otra aceptada,
+  409 "Cotización no permitida". Repetir la misma respuesta devuelve 200 con el estado actual sin cambiar nada. Se hace
+  con la solicitud bloqueada (`FOR UPDATE`, la misma fila que el envío, la postulación y la selección), así que dos
+  respuestas simultáneas, o una respuesta y un envío nuevo, no se cruzan.
+- **Aceptar no contrata.** La solicitud sigue en `PROVIDER_SELECTED` con su prestador; formalizar la contratación (estado
+  `CONTRACTED` y dirección exacta) es GC-359, que se engancha en la misma transacción. Rechazar tampoco cambia la
+  solicitud: el prestador puede enviar otra cotización.
+- El evento `cotizacion.enviada` (ADR-024, outbox) queda pendiente: el servicio todavía
   no tiene tabla OUTBOX ni publicador.

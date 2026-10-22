@@ -368,6 +368,98 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/services/requests/{id}/quotations/{quotationId}/acceptance:
+    post:
+      summary: Aceptar una cotización de una de mis solicitudes (GC-358)
+      description: |
+        Solo `ROLE_CLIENT`. El cliente acepta la cotización: queda en `ACCEPTED` con `respondedAt`.
+        La solicitud debe ser del cliente y tener prestador seleccionado (`PROVIDER_SELECTED`), y la cotización debe ser de esa
+        solicitud, del prestador seleccionado, estar `SENT` y vigente (no vencida). Una cotización rechazada, reemplazada por otra o vencida no se acepta (RF-033).
+        Si la solicitud no existe o es de otro cliente (o el identificador no es un UUID), la respuesta es la misma 404; una
+        cotización que no es de esa solicitud, no existe o no es un UUID responde 404 "Cotización no encontrada". Si se repite
+        la misma respuesta sobre una cotización que ya quedó así, responde 200 con el estado actual y no cambia nada. La
+        solicitud no cambia de estado: formalizar la contratación es GC-359.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: quotationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Cotización aceptada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Quotation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: La cotización no se puede aceptar (rechazada, reemplazada, vencida o ya respondida de otra forma), la solicitud ya no tiene prestador seleccionado vigente o ya hay otra cotización aceptada.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/services/requests/{id}/quotations/{quotationId}/rejection:
+    post:
+      summary: Rechazar una cotización de una de mis solicitudes (GC-358)
+      description: |
+        Solo `ROLE_CLIENT`. El cliente rechaza la cotización: queda en `REJECTED` con `respondedAt`; el prestador seleccionado puede enviar otra.
+        La solicitud debe ser del cliente y tener prestador seleccionado (`PROVIDER_SELECTED`), y la cotización debe ser de esa
+        solicitud, del prestador seleccionado, estar `SENT` y vigente (no vencida). Una cotización aceptada, reemplazada por otra o vencida no se rechaza.
+        Si la solicitud no existe o es de otro cliente (o el identificador no es un UUID), la respuesta es la misma 404; una
+        cotización que no es de esa solicitud, no existe o no es un UUID responde 404 "Cotización no encontrada". Si se repite
+        la misma respuesta sobre una cotización que ya quedó así, responde 200 con el estado actual y no cambia nada. La
+        solicitud no cambia de estado: formalizar la contratación es GC-359.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: quotationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Cotización rechazada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Quotation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: La cotización no se puede rechazar (aceptada, reemplazada, vencida o ya respondida de otra forma) o la solicitud ya no tiene prestador seleccionado vigente.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
   /api/services/quotations:
     post:
       summary: Crear y enviar una cotización (GC-354)
@@ -715,7 +807,7 @@ components:
         validUntil: { type: string, format: date-time }
         status: { $ref: '#/components/schemas/QuotationStatus' }
         statusName: { type: string, example: Enviada, description: Nombre del estado en español, para mostrar. }
-        expired: { type: boolean, description: Sigue SENT pero su vigencia ya pasó; no se puede aceptar. }
+        expired: { type: boolean, description: Sigue SENT pero su vigencia ya pasó; no se puede aceptar ni rechazar. }
         respondedAt: { type: string, format: date-time, nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }

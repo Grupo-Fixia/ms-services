@@ -28,4 +28,7 @@ public interface QuotationRepository extends JpaRepository<Quotation, UUID> {
 
     /** Una cotización del prestador; vacío si no existe o es de otro prestador. */
     Optional<Quotation> findByIdAndProviderId(UUID id, UUID providerId);
+
+    /** Una cotización solo se responde dentro de su solicitud: una de otra solicitud no se encuentra. */
+    Optional<Quotation> findByIdAndServiceRequestId(UUID id, UUID serviceRequestId);
 }
