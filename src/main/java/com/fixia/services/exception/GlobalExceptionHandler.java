@@ -53,6 +53,10 @@ public class GlobalExceptionHandler {
     /** Un identificador que no es UUID se trata igual que uno inexistente: no se distingue en la respuesta. */
     @ExceptionHandler({ServiceRequestNotFoundException.class, MethodArgumentTypeMismatchException.class})
     public ProblemDetail handleNotFound(Exception ex) {
+        // El id de postulación mal formado es una postulación inexistente, no una solicitud inexistente.
+        if (ex instanceof MethodArgumentTypeMismatchException mismatch && "applicationId".equals(mismatch.getName())) {
+            return handleApplicationNotFound(new ApplicationNotFoundException());
+        }
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.NOT_FOUND, "No existe la solicitud indicada");
         problem.setTitle("Solicitud no encontrada");

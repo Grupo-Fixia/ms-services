@@ -7,6 +7,10 @@ package com.fixia.services.exception;
 public class ServiceRequestNotAvailableException extends RuntimeException {
 
     public ServiceRequestNotAvailableException() {
-        super("La solicitud ya no recibe postulaciones");
+        this("La solicitud ya no recibe postulaciones");
+    }
+
+    public ServiceRequestNotAvailableException(String message) {
+        super(message);
     }
 }

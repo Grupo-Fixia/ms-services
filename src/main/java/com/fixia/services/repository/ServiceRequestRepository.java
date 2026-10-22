@@ -69,4 +69,12 @@ public interface ServiceRequestRepository extends JpaRepository<ServiceRequest, 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select r from ServiceRequest r where r.id = :id")
     Optional<ServiceRequest> findByIdForUpdate(@Param("id") UUID id);
+
+    /**
+     * Para que el cliente seleccione prestador (GC-348): bloquea solo si la solicitud es suya, de modo que un cliente
+     * no pueda retener el bloqueo de solicitudes ajenas ni averiguar su existencia por la espera.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select r from ServiceRequest r where r.id = :id and r.clientId = :clientId")
+    Optional<ServiceRequest> findByIdAndClientIdForUpdate(@Param("id") UUID id, @Param("clientId") UUID clientId);
 }
