@@ -46,6 +46,34 @@ Contrato completo en [`docs/openapi.yaml`](docs/openapi.yaml).
 El cliente sale siempre del token, nunca del cuerpo ni de la ruta. La dirección exacta se guarda pero no se
 devuelve hasta que la solicitud está `CONTRACTED`.
 
+## Oportunidades compatibles (GC-337, GC-338)
+
+| Método y ruta | Descripción |
+|---|---|
+| `GET /api/services/opportunities?limit=20&cursor=...` | Una página de solicitudes abiertas que el técnico puede atender y a las que aún no se ha postulado |
+
+- Solo `ROLE_PROFESSIONAL`; el técnico sale del token. (Antes de GC-338 la ruta era `/applications/opportunities`; ya no existe.)
+- **Compatibilidad en dos pasos.** Aquí se preseleccionan las solicitudes `PUBLISHED` con el momento esperado por
+  delante y sin postulación de ese técnico, de la más reciente a la más antigua. Luego se pregunta a ms-users, que es
+  quien guarda sus especialidades, zona de atención y disponibilidad, en `POST /internal/technicians/{userId}/eligibility`,
+  por lotes de 100 (el máximo de esa consulta). Es la misma regla que se aplica al postularse (GC-342), así que una
+  oportunidad listada es una a la que el técnico puede postularse.
+- **Respuesta:** `{ "items": [...], "nextCursor": "..." | null }`. Cada elemento trae `id`, `category`, `description`,
+  `city`, `zone`, `latitude`, `longitude` (aproximadas), `expectedAt` y `publishedAt`; no incluye al cliente, la dirección
+  exacta ni las fotos.
+- **Parámetros.** `limit`: de 1 a 50, por defecto 20. `cursor`: el `nextCursor` de la página anterior. Un valor que no se
+  pueda interpretar da 400 "Consulta inválida".
+- **Paginación por cursor.** El orden es `publishedAt` descendente y, en empate, `id` descendente; el cursor es la clave de
+  la última candidata revisada, así que nada se repite ni se salta en ese orden aunque lleguen solicitudes nuevas entre
+  páginas (las nuevas son más recientes que el cursor y no entran a mitad del recorrido; una solicitud cuyo momento
+  esperado pasa entre dos páginas deja de ofrecerse). Cada
+  consulta revisa como máximo 500 candidatas (hasta cinco llamadas a ms-users). Si no reúne `limit` oportunidades dentro de
+  ese presupuesto, devuelve las que encontró y un `nextCursor` para continuar: **una página puede venir con menos de
+  `limit` elementos, incluso vacía, y aun así tener `nextCursor`**. Se pide la siguiente hasta que `nextCursor` sea `null`;
+  recorrerlas todas entrega todas las compatibles, sin que ninguna quede oculta por antigua.
+- **Falla cerrado.** Si ms-users no responde, 503 "Elegibilidad no verificable" y no se devuelve nada.
+- **Pendiente.** No hay total de resultados. Con volumen alto conviene un índice `(status, published_at, id)`.
+
 ## Postulaciones (GC-342)
 
 | Método y ruta | Descripción |

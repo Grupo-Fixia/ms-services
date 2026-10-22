@@ -4,12 +4,15 @@ import com.fixia.services.domain.ApproximateLocation;
 import com.fixia.services.domain.ExactLocation;
 import com.fixia.services.domain.ServiceCategory;
 import com.fixia.services.domain.ServiceRequest;
+import com.fixia.services.domain.ServiceRequestApplication;
 import com.fixia.services.domain.ServiceRequestStatus;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Slice;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.context.ActiveProfiles;
@@ -18,6 +21,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -36,6 +40,9 @@ class ServiceRequestRepositoryTest {
 
     @Autowired
     private ServiceRequestRepository repository;
+
+    @Autowired
+    private ServiceRequestApplicationRepository applicationRepository;
 
     @Autowired
     private TransactionTemplate transactionTemplate;
@@ -184,5 +191,95 @@ class ServiceRequestRepositoryTest {
 
     private int count(String table) {
         return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + table, Integer.class);
+    }
+
+    // ---------- Candidatas a oportunidad (GC-337) ----------
+
+    private ServiceRequest published(Instant publishedAt, Instant expectedAt) {
+        return repository.saveAndFlush(ServiceRequest.publish(UUID.randomUUID(), ServiceCategory.PLUMBING,
+                "Fuga de agua", new ApproximateLocation("Bogotá", "Chapinero"), null, expectedAt, List.of(),
+                publishedAt));
+    }
+
+    @Test
+    void lasCandidatasSonLasPublicadasConFechaPorDelanteLaMasRecientePrimero() {
+        Instant now = now();
+        ServiceRequest older = published(now.minusSeconds(120), now.plus(Duration.ofDays(1)));
+        ServiceRequest newer = published(now.minusSeconds(60), now.plus(Duration.ofDays(1)));
+        published(now.minusSeconds(30), now.minusSeconds(1));
+        ServiceRequest cancelled = published(now.minusSeconds(20), now.plus(Duration.ofDays(1)));
+        jdbcTemplate.update("UPDATE service_requests SET status = 'CANCELLED' WHERE id = ?", cancelled.getId());
+        ServiceRequest selected = published(now.minusSeconds(10), now.plus(Duration.ofDays(1)));
+        transactionTemplate.executeWithoutResult(tx -> repository.findById(selected.getId()).orElseThrow()
+                .selectProvider(UUID.randomUUID(), now));
+
+        Slice<ServiceRequest> found = repository.findOpenWithoutApplicationFrom(PROVIDER, now, PageRequest.of(0, 10));
+
+        assertThat(found.getContent()).extracting(ServiceRequest::getId).containsExactly(newer.getId(), older.getId());
+        assertThat(found.hasNext()).isFalse();
+    }
+
+    @Test
+    void excluyeLasSolicitudesALasQueElTecnicoYaSePostuloPeroNoLasDeOtros() {
+        Instant now = now();
+        ServiceRequest mine = published(now.minusSeconds(60), now.plus(Duration.ofDays(1)));
+        ServiceRequest others = published(now.minusSeconds(30), now.plus(Duration.ofDays(1)));
+        applicationRepository.saveAndFlush(ServiceRequestApplication.submit(mine, PROVIDER, now));
+        applicationRepository.saveAndFlush(ServiceRequestApplication.submit(others, UUID.randomUUID(), now));
+
+        assertThat(repository.findOpenWithoutApplicationFrom(PROVIDER, now, PageRequest.of(0, 10)).getContent())
+                .extracting(ServiceRequest::getId).containsExactly(others.getId());
+        assertThat(repository.findOpenWithoutApplicationFrom(UUID.randomUUID(), now, PageRequest.of(0, 10))
+                .getContent()).extracting(ServiceRequest::getId).containsExactly(others.getId(), mine.getId());
+    }
+
+    @Test
+    void laPaginacionPorCursorNoRepiteNiSaltaSolicitudesNiSiquieraConElMismoInstante() {
+        Instant now = now();
+        // Siete solicitudes: tres comparten instante (desempata el id) y las demás son distintas.
+        Instant shared = now.minusSeconds(100);
+        List<Instant> publishedAt = List.of(shared, shared, shared, now.minusSeconds(90), now.minusSeconds(80),
+                now.minusSeconds(70), now.minusSeconds(60));
+        publishedAt.forEach(at -> published(at, now.plus(Duration.ofDays(1))));
+        List<ServiceRequest> fullOrder =
+                repository.findOpenWithoutApplicationFrom(PROVIDER, now, PageRequest.of(0, 50)).getContent();
+        assertThat(fullOrder).hasSize(7);
+        assertThat(fullOrder).extracting(ServiceRequest::getPublishedAt).isSortedAccordingTo(
+                java.util.Comparator.reverseOrder());
+
+        List<UUID> walked = new ArrayList<>();
+        Slice<ServiceRequest> page = repository.findOpenWithoutApplicationFrom(PROVIDER, now, PageRequest.of(0, 2));
+        int pages = 1;
+        while (true) {
+            page.forEach(request -> walked.add(request.getId()));
+            if (!page.hasNext()) {
+                break;
+            }
+            ServiceRequest last = page.getContent().get(page.getContent().size() - 1);
+            page = repository.findOpenWithoutApplicationAfter(PROVIDER, now, last.getPublishedAt(), last.getId(),
+                    PageRequest.of(0, 2));
+            pages++;
+        }
+
+        assertThat(walked).containsExactlyElementsOf(fullOrder.stream().map(ServiceRequest::getId).toList());
+        assertThat(pages).isEqualTo(4);
+    }
+
+    @Test
+    void despuesDelCursorSoloQuedanLasEstrictamenteAnterioresYSeSiguenAplicandoLasExclusiones() {
+        Instant now = now();
+        ServiceRequest newest = published(now.minusSeconds(10), now.plus(Duration.ofDays(1)));
+        ServiceRequest middle = published(now.minusSeconds(20), now.plus(Duration.ofDays(1)));
+        ServiceRequest applied = published(now.minusSeconds(30), now.plus(Duration.ofDays(1)));
+        ServiceRequest oldest = published(now.minusSeconds(40), now.plus(Duration.ofDays(1)));
+        published(now.minusSeconds(35), now.minusSeconds(1));
+        applicationRepository.saveAndFlush(ServiceRequestApplication.submit(applied, PROVIDER, now));
+
+        Slice<ServiceRequest> after = repository.findOpenWithoutApplicationAfter(PROVIDER, now,
+                newest.getPublishedAt(), newest.getId(), PageRequest.of(0, 10));
+
+        assertThat(after.getContent()).extracting(ServiceRequest::getId).containsExactly(middle.getId(), oldest.getId());
+        assertThat(repository.findOpenWithoutApplicationAfter(PROVIDER, now, oldest.getPublishedAt(), oldest.getId(),
+                PageRequest.of(0, 10)).getContent()).isEmpty();
     }
 }
