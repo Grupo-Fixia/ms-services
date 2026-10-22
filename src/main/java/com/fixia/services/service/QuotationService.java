@@ -6,6 +6,7 @@ import com.fixia.services.domain.ServiceRequest;
 import com.fixia.services.domain.ServiceRequestStatus;
 import com.fixia.services.dto.CreateQuotationRequest;
 import com.fixia.services.exception.InvalidQuotationException;
+import com.fixia.services.exception.InvalidQuotationTransitionException;
 import com.fixia.services.exception.QuotationNotAllowedException;
 import com.fixia.services.exception.QuotationNotFoundException;
 import com.fixia.services.exception.ServiceRequestNotFoundException;
@@ -28,12 +29,14 @@ public class QuotationService {
 
     private final ServiceRequestRepository serviceRequestRepository;
     private final QuotationRepository quotationRepository;
+    private final ContractService contractService;
     private final Clock clock;
 
     public QuotationService(ServiceRequestRepository serviceRequestRepository,
-                            QuotationRepository quotationRepository, Clock clock) {
+                            QuotationRepository quotationRepository, ContractService contractService, Clock clock) {
         this.serviceRequestRepository = serviceRequestRepository;
         this.quotationRepository = quotationRepository;
+        this.contractService = contractService;
         this.clock = clock;
     }
 
@@ -116,8 +119,9 @@ public class QuotationService {
     }
 
     /**
-     * El cliente acepta una cotización de su solicitud (GC-358). La solicitud <b>no</b> cambia de estado: formalizar
-     * la contratación (dirección exacta incluida) es GC-359, que se engancha en esta misma transacción.
+     * El cliente acepta una cotización de su solicitud (GC-358) y, en la misma transacción, Fixia formaliza la
+     * contratación (GC-359, CA-03): la solicitud pasa a {@code CONTRACTED} (desde ahí se entrega la dirección exacta) y
+     * queda guardada una copia de lo acordado. Nada queda a medias: si algo falla, la cotización sigue enviada.
      */
     @Transactional
     public Quotation accept(UUID clientId, UUID serviceRequestId, UUID quotationId) {
@@ -142,12 +146,14 @@ public class QuotationService {
      *   <li>La solicitud debe ser del cliente y la cotización de esa solicitud; si no, la respuesta es la misma 404
      *       (no se revela qué existe).
      *   <li>Repetir la misma respuesta (aceptar una ya aceptada, rechazar una ya rechazada) devuelve el estado
-     *       actual sin cambiar nada, para que reintentar tras perder la respuesta no parezca un fallo.
+     *       actual sin cambiar nada, para que reintentar tras perder la respuesta no parezca un fallo. Si una
+     *       cotización aceptada con GC-358 quedó sin contratar (la solicitud sigue con su prestador), repetir la
+     *       aceptación completa la contratación.
+     *   <li>La cotización debe estar enviada: una rechazada, reemplazada, vencida o ya respondida de otra forma no se
+     *       acepta ni se rechaza (409), de modo que ninguna versión anterior o modificada se acepta sin una nueva
+     *       cotización (RF-033).
      *   <li>La solicitud debe seguir con prestador seleccionado, y la cotización ser de ese prestador (409).
-     *   <li>Aceptar exige que no haya ya otra aceptada (409).
-     *   <li>El dominio exige una cotización vigente en {@code SENT}: una rechazada, reemplazada, vencida o ya
-     *       respondida de otra forma no se acepta ni se rechaza (409), de modo que ninguna versión anterior o
-     *       modificada se acepta sin una nueva cotización (RF-033).
+     *   <li>Aceptar exige que no haya ya otra aceptada (409) y que la cotización esté vigente.
      * </ol>
      */
     private Quotation respond(UUID clientId, UUID serviceRequestId, UUID quotationId, QuotationStatus decision) {
@@ -155,24 +161,42 @@ public class QuotationService {
                 .orElseThrow(ServiceRequestNotFoundException::new);
         Quotation quotation = quotationRepository.findByIdAndServiceRequestId(quotationId, request.getId())
                 .orElseThrow(QuotationNotFoundException::new);
+        Instant now = clock.instant();
         if (quotation.getStatus() == decision) {
+            if (decision == QuotationStatus.ACCEPTED && isAwaitingContract(request, quotation)) {
+                contract(request, quotation, now);
+            }
             return quotation;
         }
-        if (request.getStatus() != ServiceRequestStatus.PROVIDER_SELECTED
-                || !quotation.getProviderId().equals(request.getSelectedProviderId())) {
+        if (quotation.getStatus() != QuotationStatus.SENT) {
+            throw new InvalidQuotationTransitionException(quotation.getStatus(), decision);
+        }
+        if (!isAwaitingContract(request, quotation)) {
             throw new QuotationNotAllowedException("La solicitud ya no admite responder cotizaciones");
         }
-        Instant now = clock.instant();
         if (decision == QuotationStatus.ACCEPTED) {
             if (quotationRepository.findFirstByServiceRequestIdAndStatusOrderByCreatedAtDesc(request.getId(),
                     QuotationStatus.ACCEPTED).isPresent()) {
                 throw new QuotationNotAllowedException("La solicitud ya tiene una cotización aceptada");
             }
             quotation.accept(now);
+            contract(request, quotation, now);
         } else {
             quotation.reject(now);
         }
         return quotation;
+    }
+
+    /** La solicitud sigue con su prestador seleccionado y la cotización es la de ese prestador. */
+    private static boolean isAwaitingContract(ServiceRequest request, Quotation quotation) {
+        return request.getStatus() == ServiceRequestStatus.PROVIDER_SELECTED
+                && quotation.getProviderId().equals(request.getSelectedProviderId());
+    }
+
+    /** Formaliza la contratación: la solicitud pasa a {@code CONTRACTED} y se guarda lo acordado (GC-359). */
+    private void contract(ServiceRequest request, Quotation quotation, Instant now) {
+        request.contract(now);
+        contractService.formalize(request, quotation, now);
     }
 
     /** El instante con el que se calcula, al responder, si una cotización enviada ya venció. */
