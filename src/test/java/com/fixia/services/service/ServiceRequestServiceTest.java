@@ -2,6 +2,7 @@ package com.fixia.services.service;
 
 import com.fixia.services.domain.ApplicationStatus;
 import com.fixia.services.domain.ApproximateLocation;
+import com.fixia.services.domain.CurrencyCode;
 import com.fixia.services.domain.ServiceCategory;
 import com.fixia.services.domain.ServiceRequest;
 import com.fixia.services.domain.ServiceRequestApplication;
@@ -17,6 +18,7 @@ import com.fixia.services.repository.ServiceRequestRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -37,6 +39,8 @@ import static org.mockito.Mockito.when;
  * Reglas del servicio que la validación del cuerpo no alcanza a cubrir, con el reloj controlado.
  */
 class ServiceRequestServiceTest {
+
+    private static final BigDecimal PRICE = new BigDecimal("150000");
 
     private static final Instant NOW = Instant.parse("2026-10-15T12:00:00Z");
     private static final UUID CLIENT = UUID.randomUUID();
@@ -88,7 +92,8 @@ class ServiceRequestServiceTest {
     @Test
     void losPostulantesSeConsultanSoloSiLaSolicitudEsDelCliente() {
         ServiceRequest own = persisted(CLIENT);
-        ServiceRequestApplication application = ServiceRequestApplication.submit(own, UUID.randomUUID(), NOW);
+        ServiceRequestApplication application = ServiceRequestApplication.submit(own, UUID.randomUUID(),
+                PRICE, CurrencyCode.COP, NOW);
         when(repository.findById(own.getId())).thenReturn(Optional.of(own));
         when(applicationRepository.findByServiceRequestIdOrderByCreatedAtAscIdAsc(own.getId()))
                 .thenReturn(List.of(application));
@@ -113,8 +118,10 @@ class ServiceRequestServiceTest {
     void seleccionarMarcaLaElegidaYRechazaLasDemasSobreLaSolicitudBloqueada() {
         ServiceRequest own = persisted(CLIENT);
         UUID chosenProvider = UUID.randomUUID();
-        ServiceRequestApplication chosen = withId(ServiceRequestApplication.submit(own, chosenProvider, NOW));
-        ServiceRequestApplication other = withId(ServiceRequestApplication.submit(own, UUID.randomUUID(), NOW));
+        ServiceRequestApplication chosen = withId(ServiceRequestApplication.submit(own, chosenProvider,
+                PRICE, CurrencyCode.COP, NOW));
+        ServiceRequestApplication other = withId(ServiceRequestApplication.submit(own, UUID.randomUUID(),
+                PRICE, CurrencyCode.COP, NOW));
         when(repository.findByIdAndClientIdForUpdate(own.getId(), CLIENT)).thenReturn(Optional.of(own));
         when(applicationRepository.findByServiceRequestIdOrderByCreatedAtAscIdAsc(own.getId()))
                 .thenReturn(List.of(other, chosen));
@@ -146,7 +153,8 @@ class ServiceRequestServiceTest {
     @Test
     void repetirLaSeleccionYaHechaDevuelveElEstadoActualSinCambiarNada() {
         ServiceRequest own = persisted(CLIENT);
-        ServiceRequestApplication chosen = withId(ServiceRequestApplication.submit(own, UUID.randomUUID(), NOW));
+        ServiceRequestApplication chosen = withId(ServiceRequestApplication.submit(own, UUID.randomUUID(),
+                PRICE, CurrencyCode.COP, NOW));
         chosen.select(NOW);
         own.selectProvider(chosen.getProviderId(), NOW);
         ReflectionTestUtils.setField(chosen, "serviceRequestId", own.getId());
@@ -162,8 +170,10 @@ class ServiceRequestServiceTest {
     @Test
     void seleccionarOtraPostulacionCuandoYaHayPrestadorLanzaNoDisponible() {
         ServiceRequest own = persisted(CLIENT);
-        ServiceRequestApplication chosen = withId(ServiceRequestApplication.submit(own, UUID.randomUUID(), NOW));
-        ServiceRequestApplication rejected = withId(ServiceRequestApplication.submit(own, UUID.randomUUID(), NOW));
+        ServiceRequestApplication chosen = withId(ServiceRequestApplication.submit(own, UUID.randomUUID(),
+                PRICE, CurrencyCode.COP, NOW));
+        ServiceRequestApplication rejected = withId(ServiceRequestApplication.submit(own, UUID.randomUUID(),
+                PRICE, CurrencyCode.COP, NOW));
         ReflectionTestUtils.setField(chosen, "serviceRequestId", own.getId());
         ReflectionTestUtils.setField(rejected, "serviceRequestId", own.getId());
         chosen.select(NOW);
@@ -183,7 +193,8 @@ class ServiceRequestServiceTest {
     @Test
     void seleccionarUnaPostulacionQueNoEsDeLaSolicitudLanzaNotFoundSinCambiarNada() {
         ServiceRequest own = persisted(CLIENT);
-        ServiceRequestApplication mine = withId(ServiceRequestApplication.submit(own, UUID.randomUUID(), NOW));
+        ServiceRequestApplication mine = withId(ServiceRequestApplication.submit(own, UUID.randomUUID(),
+                PRICE, CurrencyCode.COP, NOW));
         when(repository.findByIdAndClientIdForUpdate(own.getId(), CLIENT)).thenReturn(Optional.of(own));
         when(applicationRepository.findByServiceRequestIdOrderByCreatedAtAscIdAsc(own.getId()))
                 .thenReturn(List.of(mine));

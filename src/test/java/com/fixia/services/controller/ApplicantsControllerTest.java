@@ -1,6 +1,7 @@
 package com.fixia.services.controller;
 
 import com.fixia.services.domain.ApproximateLocation;
+import com.fixia.services.domain.CurrencyCode;
 import com.fixia.services.domain.ExactLocation;
 import com.fixia.services.domain.ServiceCategory;
 import com.fixia.services.domain.ServiceRequest;
@@ -12,12 +13,14 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -25,6 +28,7 @@ import java.util.UUID;
 
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -38,6 +42,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 class ApplicantsControllerTest {
+
+    private static final BigDecimal PRICE = new BigDecimal("150000");
 
     private static final UUID CLIENT = UUID.randomUUID();
     private static final UUID OTHER_CLIENT = UUID.randomUUID();
@@ -57,6 +63,9 @@ class ApplicantsControllerTest {
     @Autowired
     private TransactionTemplate transactionTemplate;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @BeforeEach
     void cleanDatabase() {
         applicationRepository.deleteAllInBatch();
@@ -74,7 +83,8 @@ class ApplicantsControllerTest {
 
     /** Postulación del técnico, con un instante propio para fijar el orden de llegada. */
     private ServiceRequestApplication applied(ServiceRequest request, UUID provider, Instant at) {
-        return applicationRepository.saveAndFlush(ServiceRequestApplication.submit(request, provider, at));
+        return applicationRepository.saveAndFlush(ServiceRequestApplication.submit(request, provider,
+                PRICE, CurrencyCode.COP, at));
     }
 
     private static String applicants(ServiceRequest request) {
@@ -122,6 +132,35 @@ class ApplicantsControllerTest {
                 .andExpect(jsonPath("$[0].approximateLocation").doesNotExist())
                 .andExpect(jsonPath("$[0].description").doesNotExist())
                 .andExpect(jsonPath("$[0].version").doesNotExist());
+    }
+
+    @Test
+    void elClienteVeElPrecioQuePropusoCadaPostulante() throws Exception {
+        ServiceRequest request = request(CLIENT);
+        Instant base = Instant.now();
+        applicationRepository.saveAndFlush(ServiceRequestApplication.submit(request, FIRST,
+                new BigDecimal("120000"), CurrencyCode.COP, base));
+        applicationRepository.saveAndFlush(ServiceRequestApplication.submit(request, SECOND,
+                new BigDecimal("98500.50"), CurrencyCode.COP, base.plusSeconds(10)));
+
+        mockMvc.perform(get(applicants(request)).with(client(CLIENT)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].proposedAmount").value(120000.0))
+                .andExpect(jsonPath("$[1].proposedAmount").value(98500.50))
+                .andExpect(jsonPath("$[*].currency", contains("COP", "COP")));
+    }
+
+    @Test
+    void unaPostulacionAnteriorAlPrecioSeMuestraSinPrecioYNoConUnoInventado() throws Exception {
+        ServiceRequest request = request(CLIENT);
+        ServiceRequestApplication old = applied(request, FIRST, Instant.now());
+        jdbcTemplate.update("UPDATE applications SET proposed_amount = NULL, currency = NULL WHERE id = ?",
+                old.getId());
+
+        mockMvc.perform(get(applicants(request)).with(client(CLIENT)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].proposedAmount").value(nullValue()))
+                .andExpect(jsonPath("$[0].currency").value(nullValue()));
     }
 
     @Test

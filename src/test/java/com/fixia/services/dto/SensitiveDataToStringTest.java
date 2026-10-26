@@ -1,10 +1,13 @@
 package com.fixia.services.dto;
 
+import com.fixia.services.domain.CurrencyCode;
 import com.fixia.services.domain.ServiceCategory;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -20,6 +23,14 @@ class SensitiveDataToStringTest {
         assertThat(request.toString())
                 .contains("PLUMBING")
                 .doesNotContain("Descripción privada", "Calle 10", "Chapinero", "Bogotá", "a.jpg");
+    }
+
+    @Test
+    void elPrecioPropuestoDeLaPostulacionNoSeImprime() {
+        CreateApplicationRequest request = new CreateApplicationRequest(UUID.randomUUID(),
+                new BigDecimal("187654.32"), CurrencyCode.COP);
+
+        assertThat(request.toString()).doesNotContain("187654");
     }
 
     @Test

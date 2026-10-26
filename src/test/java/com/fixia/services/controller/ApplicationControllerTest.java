@@ -26,6 +26,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -104,8 +105,20 @@ class ApplicationControllerTest {
     }
 
     private ResultActions apply(UUID technician, Object serviceRequestId) throws Exception {
+        return apply(technician, serviceRequestId, 150000, "COP");
+    }
+
+    /** Postulación con el precio indicado; un valor {@code null} se omite del cuerpo. */
+    private ResultActions apply(UUID technician, Object serviceRequestId, Object proposedAmount, Object currency)
+            throws Exception {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("serviceRequestId", serviceRequestId);
+        if (proposedAmount != null) {
+            body.put("proposedAmount", proposedAmount);
+        }
+        if (currency != null) {
+            body.put("currency", currency);
+        }
         return mockMvc.perform(post(BASE).with(technician(technician)).contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(body)));
     }
@@ -149,6 +162,8 @@ class ApplicationControllerTest {
         eligible();
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("serviceRequestId", request.getId());
+        body.put("proposedAmount", 150000);
+        body.put("currency", "COP");
         body.put("providerId", OTHER_TECHNICIAN);
         body.put("status", "SELECTED");
 
@@ -222,6 +237,68 @@ class ApplicationControllerTest {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.errors[*].field").value(hasItem("serviceRequestId")));
         apply(TECHNICIAN, "no-es-uuid").andExpect(status().isBadRequest());
+    }
+
+    // ---------- Precio propuesto (GC-423) ----------
+
+    @Test
+    void elPrecioPropuestoSeGuardaYSeDevuelveAlConsultar() throws Exception {
+        ServiceRequest request = publishedRequest();
+        eligible();
+
+        String body = apply(TECHNICIAN, request.getId(), new BigDecimal("185000.50"), "COP")
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.proposedAmount").value(185000.50))
+                .andExpect(jsonPath("$.currency").value("COP"))
+                .andReturn().getResponse().getContentAsString();
+        String id = objectMapper.readTree(body).get("id").asText();
+
+        assertThat(applicationRepository.findById(UUID.fromString(id)).orElseThrow().getProposedAmount())
+                .isEqualByComparingTo("185000.50");
+        mockMvc.perform(get(BASE + "/" + id).with(technician(TECHNICIAN)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.proposedAmount").value(185000.50))
+                .andExpect(jsonPath("$.currency").value("COP"));
+        mockMvc.perform(get(BASE).with(technician(TECHNICIAN)))
+                .andExpect(jsonPath("$[0].proposedAmount").value(185000.50));
+    }
+
+    @Test
+    void sinPrecioOSinMonedaResponde400SinConsultarAMsUsers() throws Exception {
+        ServiceRequest request = publishedRequest();
+
+        apply(TECHNICIAN, request.getId(), null, "COP")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[*].field").value(hasItem("proposedAmount")));
+        apply(TECHNICIAN, request.getId(), 150000, null)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.errors[*].field").value(hasItem("currency")));
+
+        verifyNoInteractions(eligibilityClient);
+        assertThat(applicationRepository.count()).isZero();
+    }
+
+    @Test
+    void unPrecioCeroNegativoConTresDecimalesODemasiadoGrandeResponde400() throws Exception {
+        ServiceRequest request = publishedRequest();
+
+        for (Object invalid : List.of(0, -1000, new BigDecimal("100.123"), new BigDecimal("99999999999"))) {
+            apply(TECHNICIAN, request.getId(), invalid, "COP")
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.errors[*].field").value(hasItem("proposedAmount")));
+        }
+
+        verifyNoInteractions(eligibilityClient);
+        assertThat(applicationRepository.count()).isZero();
+    }
+
+    @Test
+    void unaMonedaDistintaDeCopResponde400() throws Exception {
+        apply(TECHNICIAN, publishedRequest().getId(), 150000, "USD")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Solicitud inválida"));
+
+        verifyNoInteractions(eligibilityClient);
     }
 
     // ---------- Consultar ----------

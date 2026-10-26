@@ -2,6 +2,7 @@ package com.fixia.services.repository;
 
 import com.fixia.services.domain.ApplicationStatus;
 import com.fixia.services.domain.ApproximateLocation;
+import com.fixia.services.domain.CurrencyCode;
 import com.fixia.services.domain.ServiceCategory;
 import com.fixia.services.domain.ServiceRequest;
 import com.fixia.services.domain.ServiceRequestApplication;
@@ -14,6 +15,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -31,6 +33,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @SpringBootTest
 @ActiveProfiles("test")
 class ServiceRequestApplicationRepositoryTest {
+
+    private static final BigDecimal PRICE = new BigDecimal("150000");
 
     private static final UUID PROVIDER = UUID.randomUUID();
 
@@ -64,7 +68,8 @@ class ServiceRequestApplicationRepositoryTest {
     }
 
     private ServiceRequestApplication apply(ServiceRequest request, UUID provider, Instant now) {
-        return applicationRepository.saveAndFlush(ServiceRequestApplication.submit(request, provider, now));
+        return applicationRepository.saveAndFlush(ServiceRequestApplication.submit(request, provider,
+                PRICE, CurrencyCode.COP, now));
     }
 
     @Test
@@ -96,6 +101,39 @@ class ServiceRequestApplicationRepositoryTest {
                 .extracting(ServiceRequestApplication::getId).containsExactly(older.getId(), fromOther.getId());
         assertThat(applicationRepository.findByIdAndProviderId(older.getId(), PROVIDER)).isPresent();
         assertThat(applicationRepository.findByIdAndProviderId(fromOther.getId(), PROVIDER)).isEmpty();
+    }
+
+    @Test
+    void guardaElPrecioPropuestoConDosDecimalesYSuMoneda() {
+        ServiceRequestApplication saved = applicationRepository.saveAndFlush(ServiceRequestApplication.submit(
+                publishedRequest(), PROVIDER, new BigDecimal("98500.5"), CurrencyCode.COP, now()));
+
+        ServiceRequestApplication found = applicationRepository.findById(saved.getId()).orElseThrow();
+        assertThat(found.getProposedAmount()).isEqualByComparingTo("98500.50");
+        assertThat(found.getCurrency()).isEqualTo(CurrencyCode.COP);
+        assertThat(jdbcTemplate.queryForObject("SELECT proposed_amount FROM applications WHERE id = ?",
+                String.class, saved.getId())).isEqualTo("98500.50");
+    }
+
+    @Test
+    void laBaseAdmiteUnaPostulacionHistoricaSinPrecioPeroNoUnPrecioIncompletoOInvalido() {
+        UUID id = apply(publishedRequest(), PROVIDER, now()).getId();
+
+        jdbcTemplate.update("UPDATE applications SET proposed_amount = NULL, currency = NULL WHERE id = ?", id);
+        assertThat(applicationRepository.findById(id).orElseThrow().getProposedAmount()).isNull();
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE applications SET proposed_amount = 1000 WHERE id = ?", id))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE applications SET currency = 'COP' WHERE id = ?", id))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE applications SET proposed_amount = 0, currency = 'COP' WHERE id = ?", id))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE applications SET proposed_amount = 1000, currency = 'USD' WHERE id = ?", id))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test

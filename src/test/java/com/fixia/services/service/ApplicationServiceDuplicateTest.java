@@ -3,6 +3,7 @@ package com.fixia.services.service;
 import com.fixia.services.client.TechnicianEligibilityClient;
 import com.fixia.services.domain.ApproximateLocation;
 import com.fixia.services.domain.ServiceCategory;
+import com.fixia.services.domain.CurrencyCode;
 import com.fixia.services.domain.ServiceRequest;
 import com.fixia.services.domain.ServiceRequestApplication;
 import com.fixia.services.exception.DuplicateApplicationException;
@@ -15,6 +16,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.math.BigDecimal;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Duration;
@@ -35,6 +37,8 @@ import static org.mockito.Mockito.when;
  * única de la base rechaza la segunda y el servicio la traduce al mismo 409. Cualquier otra violación no se oculta.
  */
 class ApplicationServiceDuplicateTest {
+
+    private static final BigDecimal PRICE = new BigDecimal("150000");
 
     private static final Instant NOW = Instant.parse("2026-10-17T15:00:00Z");
     private static final UUID TECHNICIAN = UUID.randomUUID();
@@ -73,7 +77,7 @@ class ApplicationServiceDuplicateTest {
         when(applications.saveAndFlush(any())).thenThrow(violation(
                 "duplicate key value violates unique constraint \"uk_applications\""));
 
-        assertThatThrownBy(() -> service.apply(TECHNICIAN, request.getId()))
+        assertThatThrownBy(() -> service.apply(TECHNICIAN, request.getId(), PRICE, CurrencyCode.COP))
                 .isInstanceOf(DuplicateApplicationException.class)
                 .hasMessage("Ya te postulaste a esta solicitud");
     }
@@ -83,7 +87,7 @@ class ApplicationServiceDuplicateTest {
         DataIntegrityViolationException other = violation("violates check constraint \"ck_applications_status\"");
         when(applications.saveAndFlush(any())).thenThrow(other);
 
-        assertThatThrownBy(() -> service.apply(TECHNICIAN, request.getId())).isSameAs(other);
+        assertThatThrownBy(() -> service.apply(TECHNICIAN, request.getId(), PRICE, CurrencyCode.COP)).isSameAs(other);
     }
 
     @Test
