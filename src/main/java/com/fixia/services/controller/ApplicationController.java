@@ -42,7 +42,8 @@ public class ApplicationController {
     public ResponseEntity<ApplicationResponse> apply(@AuthenticationPrincipal Jwt jwt,
                                                      @Valid @RequestBody CreateApplicationRequest request) {
         UUID providerId = providerId(jwt);
-        ServiceRequestApplication created = service.apply(providerId, request.serviceRequestId());
+        ServiceRequestApplication created = service.apply(providerId, request.serviceRequestId(),
+                request.proposedAmount(), request.currency());
         URI location = ServletUriComponentsBuilder.fromCurrentRequest()
                 .path("/{id}").buildAndExpand(created.getId()).toUri();
         ApplicationService.ApplicationView view = service.getMine(providerId, created.getId());
