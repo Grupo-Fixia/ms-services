@@ -1,6 +1,7 @@
 package com.fixia.services.service;
 
 import com.fixia.services.client.TechnicianEligibilityClient;
+import com.fixia.services.domain.CurrencyCode;
 import com.fixia.services.domain.ServiceRequest;
 import com.fixia.services.domain.ServiceRequestApplication;
 import com.fixia.services.exception.ApplicationNotFoundException;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.util.List;
 import java.util.Locale;
@@ -49,7 +51,7 @@ public class ApplicationService {
     }
 
     /**
-     * Postula al técnico a una solicitud disponible para la cual es elegible.
+     * Postula al técnico a una solicitud disponible para la cual es elegible, con el precio que propone (GC-423).
      *
      * <ol>
      *   <li>La solicitud debe existir (404) y seguir abierta: publicada y con el momento esperado por delante (409).
@@ -63,7 +65,8 @@ public class ApplicationService {
      *       duplicado por la restricción única, se responde el mismo 409.
      * </ol>
      */
-    public ServiceRequestApplication apply(UUID providerId, UUID serviceRequestId) {
+    public ServiceRequestApplication apply(UUID providerId, UUID serviceRequestId, BigDecimal proposedAmount,
+                                           CurrencyCode currency) {
         ServiceRequest request = serviceRequestRepository.findById(serviceRequestId)
                 .orElseThrow(ServiceRequestNotFoundException::new);
         ServiceRequestApplication.requireOpen(request, clock.instant());
@@ -77,7 +80,8 @@ public class ApplicationService {
         return transactionTemplate.execute(status -> {
             ServiceRequest locked = serviceRequestRepository.findByIdForUpdate(serviceRequestId)
                     .orElseThrow(ServiceRequestNotFoundException::new);
-            ServiceRequestApplication application = ServiceRequestApplication.submit(locked, providerId, clock.instant());
+            ServiceRequestApplication application = ServiceRequestApplication.submit(locked, providerId,
+                    proposedAmount, currency, clock.instant());
             rejectIfAlreadyApplied(serviceRequestId, providerId);
             try {
                 return applicationRepository.saveAndFlush(application);

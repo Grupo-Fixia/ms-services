@@ -185,9 +185,11 @@ paths:
 
   /api/services/applications:
     post:
-      summary: Postularse a una solicitud disponible (GC-342)
+      summary: Postularse a una solicitud disponible con un precio propuesto (GC-342, GC-423)
       description: |
-        Solo técnicos (`ROLE_PROFESSIONAL`). El técnico sale del token. La solicitud debe estar `PUBLISHED` y con el
+        Solo técnicos (`ROLE_PROFESSIONAL`). El técnico sale del token. El cuerpo lleva el precio que propone el
+        técnico (`proposedAmount` mayor que cero, hasta dos decimales, y `currency` COP); si falta o no es válido,
+        400 sin consultar a ms-users. La solicitud debe estar `PUBLISHED` y con el
         momento esperado por delante. La elegibilidad (categoría, zona de atención y disponibilidad) la decide
         ms-users; si ms-users no responde, la postulación no se registra (503). La respuesta solo incluye la
         ubicación aproximada de la solicitud.
@@ -799,15 +801,30 @@ components:
 
     CreateApplication:
       type: object
-      required: [serviceRequestId]
+      required: [serviceRequestId, proposedAmount, currency]
       properties:
         serviceRequestId: { type: string, format: uuid }
+        proposedAmount:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          example: 150000
+          description: |
+            Precio que propone el técnico (GC-423), hasta dos decimales y máximo 9999999999.99. Es distinto del
+            presupuesto del cliente y del valor de la cotización. No se puede cambiar volviendo a postularse (409).
+        currency: { type: string, enum: [COP] }
 
     Application:
       type: object
       properties:
         id: { type: string, format: uuid }
         status: { $ref: '#/components/schemas/ApplicationStatus' }
+        proposedAmount:
+          type: number
+          nullable: true
+          example: 150000.00
+          description: Precio propuesto (GC-423); `null` en postulaciones anteriores a él.
+        currency: { type: string, enum: [COP], nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         serviceRequest:
@@ -843,6 +860,12 @@ components:
         id: { type: string, format: uuid, description: Identificador de la postulación. }
         providerId: { type: string, format: uuid, description: Identificador del prestador en ms-users. }
         status: { $ref: '#/components/schemas/ApplicationStatus' }
+        proposedAmount:
+          type: number
+          nullable: true
+          example: 150000.00
+          description: Precio que propuso el prestador (GC-423), para comparar; `null` en postulaciones anteriores.
+        currency: { type: string, enum: [COP], nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
