@@ -106,12 +106,14 @@ paths:
 
   /api/services/requests/{id}/applications:
     get:
-      summary: Consultar los postulantes de una de mis solicitudes (GC-347)
+      summary: Comparar los postulantes de una de mis solicitudes (GC-347, GC-423, GC-425)
       description: |
-        Prestadores postulados a la solicitud y el estado de cada postulación, en orden de llegada (la primera
-        postulación primero). Sin postulantes responde `200` con `[]`. No incluye datos de la solicitud ni ubicación;
-        el perfil público del prestador se consulta aparte. Si la solicitud no existe, es de otro cliente o el
-        identificador no es un UUID, la respuesta es la misma 404.
+        Prestadores postulados a la solicitud, en orden de llegada (la primera postulación primero), con el estado de
+        cada postulación, el precio que propuso (GC-423) y el perfil público del prestador (GC-425), que ms-services
+        pide a ms-users por la ruta interna. Sin postulantes responde `200` con `[]` sin consultar a ms-users. No
+        incluye datos de la solicitud, ubicación ni datos de contacto del prestador. Si la solicitud no existe, es de
+        otro cliente o el identificador no es un UUID, la respuesta es la misma 404. Si ms-users no entrega los
+        perfiles, 503: no se muestran postulantes con perfiles a medias.
       security:
         - bearerAuth: []
       parameters:
@@ -136,6 +138,12 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+        '503':
+          description: ms-users no entregó el perfil de los postulantes (título "Perfiles no disponibles").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
 
   /api/services/requests/{id}/applications/{applicationId}/selection:
     post:
@@ -868,6 +876,24 @@ components:
         currency: { type: string, enum: [COP], nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+        provider:
+          $ref: '#/components/schemas/ProviderProfile'
+
+    ProviderProfile:
+      type: object
+      nullable: true
+      description: |
+        Perfil público del prestador (GC-425), tal como lo entrega ms-users. `null` si ms-users ya no lo reconoce como
+        técnico activo. Los campos que el técnico no ha llenado llegan en `null` (las especialidades, como `[]`).
+      properties:
+        displayName: { type: string, example: Carlos G., description: Nombre e inicial del apellido. }
+        verificationStatus: { type: string, example: PENDING, description: Estado de verificación del técnico. }
+        categories:
+          type: array
+          items: { $ref: '#/components/schemas/ServiceCategory' }
+        professionalDescription: { type: string, nullable: true }
+        yearsOfExperience: { type: integer, nullable: true }
+        city: { type: string, nullable: true, description: Ciudad de su zona de atención, sin coordenadas. }
 
     Opportunity:
       type: object
