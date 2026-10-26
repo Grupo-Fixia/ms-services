@@ -297,3 +297,12 @@ esquemas JSON en `docs/events/schemas` y un flujo completo de ejemplo en `docs/e
   protege con `uk_outbox_aggregate_sequence`. Los eventos quedan `PENDING` hasta que el relay (GC-434) los publique.
 - Las pruebas validan cada evento producido contra `docs/events/schemas`: si el código y el contrato se separan,
   fallan.
+
+## Contratos del Sprint 5 (GC-454)
+
+Contratos iniciales de datos, APIs y eventos del Sprint 5 para trabajar en paralelo:
+[docs/contracts/sprint-5.md](docs/contracts/sprint-5.md). Cubre los cuatro valores económicos (presupuesto, precio
+propuesto, cotización y precio contratado), el ciclo del servicio con sus estados y su historial, las evidencias, las
+evaluaciones y la reputación (en ms-users), la postulación y selección empresarial, el historial propio, los eventos
+nuevos y la numeración de migraciones. Cada punto dice si está implementado, propuesto o por decidir y quién decide.
+Si una tarea cambia un contrato, lo actualiza en ese documento en su mismo PR.
