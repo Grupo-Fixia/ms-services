@@ -185,9 +185,11 @@ paths:
 
   /api/services/applications:
     post:
-      summary: Postularse a una solicitud disponible (GC-342)
+      summary: Postularse a una solicitud disponible con un precio propuesto (GC-342, GC-423)
       description: |
-        Solo técnicos (`ROLE_PROFESSIONAL`). El técnico sale del token. La solicitud debe estar `PUBLISHED` y con el
+        Solo técnicos (`ROLE_PROFESSIONAL`). El técnico sale del token. El cuerpo lleva el precio que propone el
+        técnico (`proposedAmount` mayor que cero, hasta dos decimales, y `currency` COP); si falta o no es válido,
+        400 sin consultar a ms-users. La solicitud debe estar `PUBLISHED` y con el
         momento esperado por delante. La elegibilidad (categoría, zona de atención y disponibilidad) la decide
         ms-users; si ms-users no responde, la postulación no se registra (503). La respuesta solo incluye la
         ubicación aproximada de la solicitud.
@@ -361,6 +363,184 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Quotation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/services/requests/{id}/quotations/{quotationId}/acceptance:
+    post:
+      summary: Aceptar una cotización de una de mis solicitudes (GC-358)
+      description: |
+        Solo `ROLE_CLIENT`. El cliente acepta la cotización: queda en `ACCEPTED` con `respondedAt` y, **en la misma transacción**,
+        Fixia formaliza la contratación (GC-359, CA-03): la solicitud pasa a `CONTRACTED`, se guarda una copia de lo acordado
+        (consultable en `GET /api/services/requests/{id}/contract` y `GET /api/services/contracts/{id}`) y desde ese momento la
+        dirección exacta se entrega al cliente y al prestador contratado. Si algo falla, no queda nada a medias.
+        La solicitud debe ser del cliente y tener prestador seleccionado (`PROVIDER_SELECTED`), y la cotización debe ser de esa
+        solicitud, del prestador seleccionado, estar `SENT` y vigente (no vencida). Una cotización rechazada, reemplazada por otra o vencida no se acepta (RF-033).
+        Si la solicitud no existe o es de otro cliente (o el identificador no es un UUID), la respuesta es la misma 404; una
+        cotización que no es de esa solicitud, no existe o no es un UUID responde 404 "Cotización no encontrada". Si se repite
+        la misma respuesta sobre una cotización que ya quedó así, responde 200 con el estado actual y no cambia nada (y, si una
+        cotización aceptada antes de GC-359 había quedado sin contratar, repetir la aceptación completa la contratación). El
+        pago del servicio ocurre fuera de Fixia: no se crea saldo, retención ni pago.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: quotationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Cotización aceptada; la solicitud queda contratada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Quotation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: La cotización no se puede aceptar (rechazada, reemplazada, vencida o ya respondida de otra forma), la solicitud ya no tiene prestador seleccionado vigente o ya hay otra cotización aceptada.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/services/requests/{id}/quotations/{quotationId}/rejection:
+    post:
+      summary: Rechazar una cotización de una de mis solicitudes (GC-358)
+      description: |
+        Solo `ROLE_CLIENT`. El cliente rechaza la cotización: queda en `REJECTED` con `respondedAt`; el prestador seleccionado puede enviar otra.
+        La solicitud debe ser del cliente y tener prestador seleccionado (`PROVIDER_SELECTED`), y la cotización debe ser de esa
+        solicitud, del prestador seleccionado, estar `SENT` y vigente (no vencida). Una cotización aceptada, reemplazada por otra o vencida no se rechaza.
+        Si la solicitud no existe o es de otro cliente (o el identificador no es un UUID), la respuesta es la misma 404; una
+        cotización que no es de esa solicitud, no existe o no es un UUID responde 404 "Cotización no encontrada". Si se repite
+        la misma respuesta sobre una cotización que ya quedó así, responde 200 con el estado actual y no cambia nada. La
+        solicitud no cambia de estado: el prestador seleccionado puede enviar otra cotización.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: quotationId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Cotización rechazada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Quotation'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: La cotización no se puede rechazar (aceptada, reemplazada, vencida o ya respondida de otra forma) o la solicitud ya no tiene prestador seleccionado vigente.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/services/requests/{id}/contract:
+    get:
+      summary: Contratación de una de mis solicitudes (GC-359)
+      description: |
+        Solo `ROLE_CLIENT`. La contratación que nació al aceptar una cotización: lo acordado (valor, moneda, alcance,
+        condiciones y fecha del servicio) y un resumen de la solicitud con su dirección exacta. Si la solicitud no existe o es
+        de otro cliente (o el identificador no es un UUID), la respuesta es la misma 404; si todavía no se contrató, 404
+        "Contratación no encontrada".
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Contratación de la solicitud.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/services/contracts:
+    get:
+      summary: Mis contrataciones como prestador (GC-359)
+      description: |
+        Solo `ROLE_PROFESSIONAL`. Las contrataciones del prestador autenticado, la más reciente primero. Es el camino por el que
+        el prestador recibe la dirección exacta de la solicitud que contrató (ADR-009): solo existe con la solicitud contratada.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Contrataciones del prestador.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Contract'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/services/contracts/{contractId}:
+    get:
+      summary: Una de mis contrataciones como prestador (GC-359)
+      description: |
+        Solo `ROLE_PROFESSIONAL`. Si la contratación no existe, es de otro prestador o el identificador no es un UUID, la
+        respuesta es la misma 404 "Contratación no encontrada".
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: La contratación, con la dirección exacta.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '403':
@@ -621,15 +801,30 @@ components:
 
     CreateApplication:
       type: object
-      required: [serviceRequestId]
+      required: [serviceRequestId, proposedAmount, currency]
       properties:
         serviceRequestId: { type: string, format: uuid }
+        proposedAmount:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          example: 150000
+          description: |
+            Precio que propone el técnico (GC-423), hasta dos decimales y máximo 9999999999.99. Es distinto del
+            presupuesto del cliente y del valor de la cotización. No se puede cambiar volviendo a postularse (409).
+        currency: { type: string, enum: [COP] }
 
     Application:
       type: object
       properties:
         id: { type: string, format: uuid }
         status: { $ref: '#/components/schemas/ApplicationStatus' }
+        proposedAmount:
+          type: number
+          nullable: true
+          example: 150000.00
+          description: Precio propuesto (GC-423); `null` en postulaciones anteriores a él.
+        currency: { type: string, enum: [COP], nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
         serviceRequest:
@@ -665,6 +860,12 @@ components:
         id: { type: string, format: uuid, description: Identificador de la postulación. }
         providerId: { type: string, format: uuid, description: Identificador del prestador en ms-users. }
         status: { $ref: '#/components/schemas/ApplicationStatus' }
+        proposedAmount:
+          type: number
+          nullable: true
+          example: 150000.00
+          description: Precio que propuso el prestador (GC-423), para comparar; `null` en postulaciones anteriores.
+        currency: { type: string, enum: [COP], nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
@@ -715,10 +916,49 @@ components:
         validUntil: { type: string, format: date-time }
         status: { $ref: '#/components/schemas/QuotationStatus' }
         statusName: { type: string, example: Enviada, description: Nombre del estado en español, para mostrar. }
-        expired: { type: boolean, description: Sigue SENT pero su vigencia ya pasó; no se puede aceptar. }
+        expired: { type: boolean, description: Sigue SENT pero su vigencia ya pasó; no se puede aceptar ni rechazar. }
         respondedAt: { type: string, format: date-time, nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
+
+    Contract:
+      type: object
+      description: |
+        Contratación formalizada al aceptar una cotización (GC-359): copia inmutable de lo acordado. No trae datos de contacto
+        ni de pago: el pago ocurre fuera de Fixia.
+      properties:
+        id: { type: string, format: uuid }
+        serviceRequestId: { type: string, format: uuid }
+        quotationId: { type: string, format: uuid }
+        clientId: { type: string, format: uuid, description: Identificador del cliente en ms-users. }
+        providerId: { type: string, format: uuid, description: Identificador del prestador en ms-users. }
+        amount: { type: number, example: 150000.00 }
+        currency: { type: string, enum: [COP] }
+        scope: { type: string }
+        conditions: { type: string }
+        agreedAt: { type: string, format: date-time, description: Fecha acordada para el servicio. }
+        contractedAt: { type: string, format: date-time }
+        serviceRequest:
+          type: object
+          properties:
+            category: { $ref: '#/components/schemas/ServiceCategory' }
+            description: { type: string }
+            status: { $ref: '#/components/schemas/ServiceRequestStatus' }
+            approximateLocation:
+              type: object
+              properties:
+                city: { type: string }
+                zone: { type: string }
+                latitude: { type: number, format: double, nullable: true }
+                longitude: { type: number, format: double, nullable: true }
+            exactLocation:
+              type: object
+              description: Presente porque la solicitud ya está `CONTRACTED`, si el cliente indicó una dirección.
+              properties:
+                address: { type: string }
+                latitude: { type: number, format: double, nullable: true }
+                longitude: { type: number, format: double, nullable: true }
+            expectedAt: { type: string, format: date-time }
 
     NotEligibleProblem:
       allOf:

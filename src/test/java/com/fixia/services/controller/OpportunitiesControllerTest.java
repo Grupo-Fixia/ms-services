@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fixia.services.client.EligibilityCheckException;
 import com.fixia.services.client.TechnicianEligibilityClient;
 import com.fixia.services.domain.ApproximateLocation;
+import com.fixia.services.domain.CurrencyCode;
 import com.fixia.services.domain.ExactLocation;
 import com.fixia.services.domain.ServiceCategory;
 import com.fixia.services.domain.ServiceRequest;
@@ -24,6 +25,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -56,6 +58,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 class OpportunitiesControllerTest {
+
+    private static final BigDecimal PRICE = new BigDecimal("150000");
 
     private static final String URL = "/api/services/opportunities";
     private static final UUID TECHNICIAN = UUID.randomUUID();
@@ -171,7 +175,8 @@ class OpportunitiesControllerTest {
         Instant now = Instant.now();
         ServiceRequest applied = published(ServiceCategory.PLUMBING, "Bogotá", now.minusSeconds(120));
         ServiceRequest free = published(ServiceCategory.PLUMBING, "Bogotá", now.minusSeconds(60));
-        applicationRepository.saveAndFlush(ServiceRequestApplication.submit(applied, TECHNICIAN, now));
+        applicationRepository.saveAndFlush(ServiceRequestApplication.submit(applied, TECHNICIAN,
+                PRICE, CurrencyCode.COP, now));
         eligibleOnly(Set.of(applied.getId(), free.getId()));
 
         page("").andExpect(jsonPath("$.items", hasSize(1)))

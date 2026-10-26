@@ -1,6 +1,7 @@
 package com.fixia.services.repository;
 
 import com.fixia.services.domain.ApproximateLocation;
+import com.fixia.services.domain.CurrencyCode;
 import com.fixia.services.domain.ExactLocation;
 import com.fixia.services.domain.ServiceCategory;
 import com.fixia.services.domain.ServiceRequest;
@@ -18,6 +19,7 @@ import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -35,6 +37,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @SpringBootTest
 @ActiveProfiles("test")
 class ServiceRequestRepositoryTest {
+
+    private static final BigDecimal PRICE = new BigDecimal("150000");
 
     private static final UUID PROVIDER = UUID.randomUUID();
 
@@ -224,8 +228,10 @@ class ServiceRequestRepositoryTest {
         Instant now = now();
         ServiceRequest mine = published(now.minusSeconds(60), now.plus(Duration.ofDays(1)));
         ServiceRequest others = published(now.minusSeconds(30), now.plus(Duration.ofDays(1)));
-        applicationRepository.saveAndFlush(ServiceRequestApplication.submit(mine, PROVIDER, now));
-        applicationRepository.saveAndFlush(ServiceRequestApplication.submit(others, UUID.randomUUID(), now));
+        applicationRepository.saveAndFlush(ServiceRequestApplication.submit(mine, PROVIDER,
+                PRICE, CurrencyCode.COP, now));
+        applicationRepository.saveAndFlush(ServiceRequestApplication.submit(others, UUID.randomUUID(),
+                PRICE, CurrencyCode.COP, now));
 
         assertThat(repository.findOpenWithoutApplicationFrom(PROVIDER, now, PageRequest.of(0, 10)).getContent())
                 .extracting(ServiceRequest::getId).containsExactly(others.getId());
@@ -273,7 +279,8 @@ class ServiceRequestRepositoryTest {
         ServiceRequest applied = published(now.minusSeconds(30), now.plus(Duration.ofDays(1)));
         ServiceRequest oldest = published(now.minusSeconds(40), now.plus(Duration.ofDays(1)));
         published(now.minusSeconds(35), now.minusSeconds(1));
-        applicationRepository.saveAndFlush(ServiceRequestApplication.submit(applied, PROVIDER, now));
+        applicationRepository.saveAndFlush(ServiceRequestApplication.submit(applied, PROVIDER,
+                PRICE, CurrencyCode.COP, now));
 
         Slice<ServiceRequest> after = repository.findOpenWithoutApplicationAfter(PROVIDER, now,
                 newest.getPublishedAt(), newest.getId(), PageRequest.of(0, 10));

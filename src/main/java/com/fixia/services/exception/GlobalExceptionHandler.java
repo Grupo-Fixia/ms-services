@@ -61,6 +61,10 @@ public class GlobalExceptionHandler {
         if (ex instanceof MethodArgumentTypeMismatchException mismatch && "quotationId".equals(mismatch.getName())) {
             return handleQuotationNotFound(new QuotationNotFoundException());
         }
+        // Y con el id de contratación (GC-359).
+        if (ex instanceof MethodArgumentTypeMismatchException mismatch && "contractId".equals(mismatch.getName())) {
+            return handleContractNotFound(new ContractNotFoundException());
+        }
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.NOT_FOUND, "No existe la solicitud indicada");
         problem.setTitle("Solicitud no encontrada");
@@ -143,6 +147,20 @@ public class GlobalExceptionHandler {
     public ProblemDetail handleQuotationNotAllowed(QuotationNotAllowedException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
         problem.setTitle("Cotización no permitida");
+        return problem;
+    }
+
+    @ExceptionHandler(InvalidQuotationTransitionException.class)
+    public ProblemDetail handleInvalidQuotationTransition(InvalidQuotationTransitionException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Cambio de estado no permitido");
+        return problem;
+    }
+
+    @ExceptionHandler(ContractNotFoundException.class)
+    public ProblemDetail handleContractNotFound(ContractNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Contratación no encontrada");
         return problem;
     }
 }

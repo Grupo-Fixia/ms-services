@@ -1,8 +1,10 @@
 package com.fixia.services.dto;
 
 import com.fixia.services.domain.ApplicationStatus;
+import com.fixia.services.domain.CurrencyCode;
 import com.fixia.services.domain.ServiceRequestApplication;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -14,6 +16,8 @@ public record ApplicantResponse(
         UUID id,
         UUID providerId,
         ApplicationStatus status,
+        BigDecimal proposedAmount,
+        CurrencyCode currency,
         Instant createdAt,
         Instant updatedAt
 ) {
@@ -23,6 +27,8 @@ public record ApplicantResponse(
                 application.getId(),
                 application.getProviderId(),
                 application.getStatus(),
+                application.getProposedAmount(),
+                application.getCurrency(),
                 application.getCreatedAt(),
                 application.getUpdatedAt());
     }

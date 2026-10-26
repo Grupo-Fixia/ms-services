@@ -74,11 +74,11 @@ devuelve hasta que la solicitud está `CONTRACTED`.
 - **Falla cerrado.** Si ms-users no responde, 503 "Elegibilidad no verificable" y no se devuelve nada.
 - **Pendiente.** No hay total de resultados. Con volumen alto conviene un índice `(status, published_at, id)`.
 
-## Postulaciones (GC-342)
+## Postulaciones (GC-342, GC-423)
 
 | Método y ruta | Descripción |
 |---|---|
-| `POST /api/services/applications` | El técnico se postula a una solicitud (201 + `Location`) |
+| `POST /api/services/applications` | El técnico se postula a una solicitud con su precio propuesto (201 + `Location`) |
 | `GET /api/services/applications` | Mis postulaciones, la más reciente primero |
 | `GET /api/services/applications/{id}` | Una de mis postulaciones; 404 si no existe o es de otro técnico |
 
@@ -96,6 +96,12 @@ devuelve hasta que la solicitud está `CONTRACTED`.
   `(service_request_id, provider_id)` (migración V4). La respuesta es 409 "Postulación duplicada" con el
   `applicationId` existente.
 - La verificación del técnico (`VALID`) todavía no se exige: no existe el flujo de verificación (pendiente de RN-001).
+- **Precio propuesto (GC-423):** el cuerpo es `{"serviceRequestId": "...", "proposedAmount": 150000, "currency": "COP"}`.
+  El precio es obligatorio, mayor que cero, con máximo dos decimales y en COP (las mismas reglas que el valor de una
+  cotización); si no es válido, 400 sin consultar a ms-users. Es distinto del presupuesto del cliente y del valor de
+  la cotización. No se edita: volver a postularse con otro precio es el mismo 409 de duplicado. Columnas
+  `proposed_amount` y `currency` (migración V6), en `NULL` para las postulaciones anteriores, que se devuelven sin
+  precio en lugar de uno inventado. La restricción `ck_applications_proposed_price` exige ambos o ninguno.
 
 ## Postulantes de una solicitud (GC-347)
 
@@ -107,7 +113,8 @@ devuelve hasta que la solicitud está `CONTRACTED`.
   un UUID, la respuesta es la misma (404 "No existe la solicitud indicada").
 - Lista en orden de llegada (la primera postulación primero); sin postulantes, `200` con `[]`. Sin paginación por
   ahora. Se puede consultar en cualquier estado de la solicitud, para ver también a quién se eligió.
-- Cada elemento trae `id`, `providerId`, `status` (`APPLIED`, `SELECTED` o `REJECTED`), `createdAt` y `updatedAt`.
+- Cada elemento trae `id`, `providerId`, `status` (`APPLIED`, `SELECTED` o `REJECTED`), `proposedAmount` y
+  `currency` (el precio que propuso, GC-423; `null` en postulaciones anteriores), `createdAt` y `updatedAt`.
   No incluye datos de la solicitud ni ubicación. El perfil público del prestador se consulta aparte (GC-350).
 
 ## Selección de prestador (GC-348)
@@ -206,7 +213,7 @@ SENT -> ACCEPTED | REJECTED | EXPIRED | SUPERSEDED
 - A lo sumo una cotización `SENT` y ninguna nueva si ya hay una `ACCEPTED` por solicitud: lo controla la API
   (GC-354) con la solicitud bloqueada, porque H2 no admite índices únicos parciales.
 
-## API de cotizaciones (GC-354)
+## API de cotizaciones (GC-354, GC-358)
 
 | Método y ruta | Rol | Descripción |
 |---|---|---|
@@ -214,6 +221,8 @@ SENT -> ACCEPTED | REJECTED | EXPIRED | SUPERSEDED
 | `GET /api/services/quotations` | `ROLE_PROFESSIONAL` | Mis cotizaciones, la más reciente primero; filtro opcional `?serviceRequestId=` |
 | `GET /api/services/quotations/{quotationId}` | `ROLE_PROFESSIONAL` | Una de mis cotizaciones; 404 si no existe o es de otro prestador |
 | `GET /api/services/requests/{id}/quotations` | `ROLE_CLIENT` | Cotizaciones recibidas en mi solicitud, la más reciente primero |
+| `POST /api/services/requests/{id}/quotations/{quotationId}/acceptance` | `ROLE_CLIENT` | El cliente acepta una cotización vigente (200, `ACCEPTED`) |
+| `POST /api/services/requests/{id}/quotations/{quotationId}/rejection` | `ROLE_CLIENT` | El cliente rechaza una cotización vigente (200, `REJECTED`) |
 
 - Cuerpo del `POST`: `serviceRequestId`, `amount` (mayor que cero, dos decimales), `currency` (`COP`), `scope`,
   `conditions` (hasta 2000 caracteres), `agreedAt` y `validUntil` (ISO-8601). El prestador sale del token.
@@ -227,5 +236,39 @@ SENT -> ACCEPTED | REJECTED | EXPIRED | SUPERSEDED
   dos envíos simultáneos no dejan dos vigentes.
 - **Vencimiento.** La respuesta trae `expired: true` cuando la cotización sigue `SENT` pero su vigencia ya pasó; no se
   puede aceptar. Ningún proceso la pasa todavía a `EXPIRED` por sí solo.
-- Aceptar o rechazar es GC-358. El evento `cotizacion.enviada` (ADR-024, outbox) queda pendiente: el servicio todavía
+- **Aceptar o rechazar (GC-358).** Responde el cliente dueño de la solicitud (otro cliente o una cotización de otra solicitud
+  da la misma 404; el prestador, 403). Solo se responde una cotización `SENT` y vigente, de la solicitud en
+  `PROVIDER_SELECTED` y del prestador seleccionado; una rechazada, reemplazada, vencida o ya respondida de otra forma da
+  409 "Cambio de estado no permitido" (RF-033), y si la solicitud ya no tiene prestador vigente o ya hay otra aceptada,
+  409 "Cotización no permitida". Repetir la misma respuesta devuelve 200 con el estado actual sin cambiar nada. Se hace
+  con la solicitud bloqueada (`FOR UPDATE`, la misma fila que el envío, la postulación y la selección), así que dos
+  respuestas simultáneas, o una respuesta y un envío nuevo, no se cruzan.
+- **Aceptar contrata (GC-359).** Al aceptar, en la misma transacción, la solicitud pasa a `CONTRACTED` y se guarda la
+  contratación con una copia de lo acordado (ver «Contratación»); si algo falla, la cotización sigue enviada. Rechazar no
+  cambia la solicitud: el prestador puede enviar otra cotización.
+- El evento `cotizacion.enviada` (ADR-024, outbox) queda pendiente: el servicio todavía
   no tiene tabla OUTBOX ni publicador.
+
+## Contratación (GC-359)
+
+`ServiceContract` (tabla `service_contracts`, migración V5) nace en la misma transacción en que el cliente acepta una
+cotización vigente (RF-035, CA-03) y guarda una **copia inmutable** de lo acordado: valor (`NUMERIC(12,2)`, `COP`), alcance,
+condiciones y fecha del servicio, más los ids de solicitud, cotización, cliente y prestador (sin FK a ms-users). El pago del
+servicio ocurre fuera de Fixia (RN-005, RN-006, CA-04): no hay columnas de saldo, retención ni pago. El estado del servicio es el
+de la solicitud (`CONTRACTED`); no se duplica en la contratación.
+
+- Una contratación por solicitud y una por cotización (restricciones únicas); se borra con la solicitud.
+- Al aceptar se valida, con la solicitud bloqueada, que la cotización esté `SENT`, vigente y sea la del prestador seleccionado.
+- **Reparación:** si una cotización aceptada con GC-358 (antes de GC-359) quedó sin contratar, repetir la aceptación completa
+  la contratación y responde 200.
+- La **dirección exacta** solo existe con la solicitud contratada (ADR-009): la recibe el cliente (`GET /requests/{id}`) y el
+  prestador contratado, únicamente por la contratación.
+
+| Método y ruta | Rol | Descripción |
+|---|---|---|
+| `GET /api/services/requests/{id}/contract` | `ROLE_CLIENT` | La contratación de mi solicitud; 404 si no existe, es de otro cliente o aún no se contrató |
+| `GET /api/services/contracts` | `ROLE_PROFESSIONAL` | Mis contrataciones, la más reciente primero |
+| `GET /api/services/contracts/{contractId}` | `ROLE_PROFESSIONAL` | Una de mis contrataciones; 404 si es de otro prestador |
+
+La respuesta (`Contract`) trae lo acordado y un resumen de la solicitud con `exactLocation`; no trae datos de contacto (el
+cliente y el prestador llegan como UUID de ms-users).

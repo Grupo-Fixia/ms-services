@@ -85,11 +85,16 @@ class DuplicateApplicationTest {
     }
 
     private ResultActions apply(UUID technician, UUID serviceRequestId) throws Exception {
+        return apply(technician, serviceRequestId, 150000);
+    }
+
+    private ResultActions apply(UUID technician, UUID serviceRequestId, long price) throws Exception {
         return mockMvc.perform(post(BASE)
                 .with(jwt().jwt(token -> token.subject("usr_" + technician))
                         .authorities(new SimpleGrantedAuthority("ROLE_PROFESSIONAL")))
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"serviceRequestId\":\"" + serviceRequestId + "\"}"));
+                .content("{\"serviceRequestId\":\"" + serviceRequestId + "\",\"proposedAmount\":" + price
+                        + ",\"currency\":\"COP\"}"));
     }
 
     private UUID idOf(ResultActions result) throws Exception {
@@ -110,6 +115,21 @@ class DuplicateApplicationTest {
 
         verify(eligibilityClient, times(1)).check(any(), any());
         assertThat(applicationRepository.count()).isEqualTo(1);
+    }
+
+    @Test
+    void volverAPostularseConOtroPrecioResponde409YConservaElPrecioOriginal() throws Exception {
+        ServiceRequest request = publishedRequest();
+        UUID first = idOf(apply(TECHNICIAN, request.getId(), 150000).andExpect(status().isCreated()));
+
+        apply(TECHNICIAN, request.getId(), 90000)
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.title").value("Postulación duplicada"))
+                .andExpect(jsonPath("$.applicationId").value(first.toString()));
+
+        assertThat(applicationRepository.count()).isEqualTo(1);
+        assertThat(applicationRepository.findById(first).orElseThrow().getProposedAmount())
+                .isEqualByComparingTo("150000");
     }
 
     @Test
