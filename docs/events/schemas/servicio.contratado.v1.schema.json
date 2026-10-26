@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fixia.local/schemas/events/servicio.contratado.v1.schema.json",
+  "title": "servicio.contratado (versión 1)",
+  "description": "El cliente aceptó la cotización y quedó formalizada la contratación en la misma transacción (RF-034, RF-035, ADR-046). Lleva la copia inmutable de lo acordado; implica la cotización aceptada, por eso no hay un evento cotizacion.aceptada aparte. Fixia no custodia el pago (RN-005, RN-006).",
+  "allOf": [
+    {
+      "$ref": "https://fixia.local/schemas/events/envelope.v1.schema.json"
+    }
+  ],
+  "properties": {
+    "eventType": {
+      "const": "servicio.contratado"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "actor": {
+      "properties": {
+        "role": {
+          "const": "CLIENT"
+        }
+      }
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "contractId",
+        "serviceRequestId",
+        "quotationId",
+        "clientId",
+        "providerId",
+        "price",
+        "scope",
+        "conditions",
+        "agreedAt",
+        "contractedAt",
+        "status"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "contractId": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
+        },
+        "serviceRequestId": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
+        },
+        "quotationId": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
+        },
+        "clientId": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
+        },
+        "providerId": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
+        },
+        "price": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/money"
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "conditions": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "agreedAt": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/instant"
+        },
+        "contractedAt": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/instant"
+        },
+        "status": {
+          "const": "CONTRACTED"
+        }
+      }
+    }
+  }
+}

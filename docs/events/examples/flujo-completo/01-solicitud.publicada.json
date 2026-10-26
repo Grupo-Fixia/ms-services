@@ -1,0 +1,33 @@
+{
+  "eventId": "8c9d0e1f-2a3b-4c4d-9e5f-708192a3b4c1",
+  "eventType": "solicitud.publicada",
+  "schemaVersion": 1,
+  "occurredAt": "2026-10-26T14:00:00Z",
+  "producer": "ms-services",
+  "aggregate": {
+    "type": "ServiceRequest",
+    "id": "6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7",
+    "sequence": 1
+  },
+  "correlationId": "6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7",
+  "actor": {
+    "userId": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+    "role": "CLIENT"
+  },
+  "data": {
+    "serviceRequestId": "6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7",
+    "clientId": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+    "category": "PLUMBING",
+    "description": "Fuga de agua debajo del lavamanos del baño principal",
+    "approximateLocation": {
+      "city": "Bogotá",
+      "zone": "Chapinero",
+      "latitude": 4.6533,
+      "longitude": -74.0836
+    },
+    "expectedAt": "2026-10-28T15:00:00Z",
+    "publishedAt": "2026-10-26T14:00:00Z",
+    "status": "PUBLISHED",
+    "photoCount": 2
+  }
+}

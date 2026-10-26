@@ -1,0 +1,28 @@
+{
+  "eventId": "8c9d0e1f-2a3b-4c4d-9e5f-708192a3b4c3",
+  "eventType": "postulacion.registrada",
+  "schemaVersion": 1,
+  "occurredAt": "2026-10-26T14:35:00Z",
+  "producer": "ms-services",
+  "aggregate": {
+    "type": "ServiceRequest",
+    "id": "6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7",
+    "sequence": 3
+  },
+  "correlationId": "6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7",
+  "actor": {
+    "userId": "2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f",
+    "role": "PROFESSIONAL"
+  },
+  "data": {
+    "applicationId": "4e5f6a7b-8c9d-4e0f-9a1b-3c4d5e6f7081",
+    "serviceRequestId": "6f1c2a3b-4d5e-4f60-8a71-92b3c4d5e6f7",
+    "providerId": "2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f",
+    "status": "APPLIED",
+    "proposedPrice": {
+      "amount": "98500.50",
+      "currency": "COP"
+    },
+    "appliedAt": "2026-10-26T14:35:00Z"
+  }
+}
