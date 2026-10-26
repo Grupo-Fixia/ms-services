@@ -74,11 +74,11 @@ devuelve hasta que la solicitud está `CONTRACTED`.
 - **Falla cerrado.** Si ms-users no responde, 503 "Elegibilidad no verificable" y no se devuelve nada.
 - **Pendiente.** No hay total de resultados. Con volumen alto conviene un índice `(status, published_at, id)`.
 
-## Postulaciones (GC-342)
+## Postulaciones (GC-342, GC-423)
 
 | Método y ruta | Descripción |
 |---|---|
-| `POST /api/services/applications` | El técnico se postula a una solicitud (201 + `Location`) |
+| `POST /api/services/applications` | El técnico se postula a una solicitud con su precio propuesto (201 + `Location`) |
 | `GET /api/services/applications` | Mis postulaciones, la más reciente primero |
 | `GET /api/services/applications/{id}` | Una de mis postulaciones; 404 si no existe o es de otro técnico |
 
@@ -96,6 +96,12 @@ devuelve hasta que la solicitud está `CONTRACTED`.
   `(service_request_id, provider_id)` (migración V4). La respuesta es 409 "Postulación duplicada" con el
   `applicationId` existente.
 - La verificación del técnico (`VALID`) todavía no se exige: no existe el flujo de verificación (pendiente de RN-001).
+- **Precio propuesto (GC-423):** el cuerpo es `{"serviceRequestId": "...", "proposedAmount": 150000, "currency": "COP"}`.
+  El precio es obligatorio, mayor que cero, con máximo dos decimales y en COP (las mismas reglas que el valor de una
+  cotización); si no es válido, 400 sin consultar a ms-users. Es distinto del presupuesto del cliente y del valor de
+  la cotización. No se edita: volver a postularse con otro precio es el mismo 409 de duplicado. Columnas
+  `proposed_amount` y `currency` (migración V6), en `NULL` para las postulaciones anteriores, que se devuelven sin
+  precio en lugar de uno inventado. La restricción `ck_applications_proposed_price` exige ambos o ninguno.
 
 ## Postulantes de una solicitud (GC-347)
 
@@ -107,7 +113,8 @@ devuelve hasta que la solicitud está `CONTRACTED`.
   un UUID, la respuesta es la misma (404 "No existe la solicitud indicada").
 - Lista en orden de llegada (la primera postulación primero); sin postulantes, `200` con `[]`. Sin paginación por
   ahora. Se puede consultar en cualquier estado de la solicitud, para ver también a quién se eligió.
-- Cada elemento trae `id`, `providerId`, `status` (`APPLIED`, `SELECTED` o `REJECTED`), `createdAt` y `updatedAt`.
+- Cada elemento trae `id`, `providerId`, `status` (`APPLIED`, `SELECTED` o `REJECTED`), `proposedAmount` y
+  `currency` (el precio que propuso, GC-423; `null` en postulaciones anteriores), `createdAt` y `updatedAt`.
   No incluye datos de la solicitud ni ubicación. El perfil público del prestador se consulta aparte (GC-350).
 
 ## Selección de prestador (GC-348)
