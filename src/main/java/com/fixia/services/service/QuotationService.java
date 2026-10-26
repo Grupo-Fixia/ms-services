@@ -2,6 +2,7 @@ package com.fixia.services.service;
 
 import com.fixia.services.domain.Quotation;
 import com.fixia.services.domain.QuotationStatus;
+import com.fixia.services.domain.ServiceContract;
 import com.fixia.services.domain.ServiceRequest;
 import com.fixia.services.domain.ServiceRequestStatus;
 import com.fixia.services.dto.CreateQuotationRequest;
@@ -30,13 +31,16 @@ public class QuotationService {
     private final ServiceRequestRepository serviceRequestRepository;
     private final QuotationRepository quotationRepository;
     private final ContractService contractService;
+    private final BusinessEventRecorder events;
     private final Clock clock;
 
     public QuotationService(ServiceRequestRepository serviceRequestRepository,
-                            QuotationRepository quotationRepository, ContractService contractService, Clock clock) {
+                            QuotationRepository quotationRepository, ContractService contractService,
+                            BusinessEventRecorder events, Clock clock) {
         this.serviceRequestRepository = serviceRequestRepository;
         this.quotationRepository = quotationRepository;
         this.contractService = contractService;
+        this.events = events;
         this.clock = clock;
     }
 
@@ -79,15 +83,19 @@ public class QuotationService {
             throw new InvalidQuotationException(e.getMessage(), e);
         }
 
-        for (Quotation previous : quotationRepository.findByServiceRequestIdAndStatus(request.getId(),
-                QuotationStatus.SENT)) {
+        List<Quotation> replaced = quotationRepository.findByServiceRequestIdAndStatus(request.getId(),
+                QuotationStatus.SENT);
+        for (Quotation previous : replaced) {
             if (previous.isExpiredAt(now)) {
                 previous.expire(now);
             } else {
                 previous.supersede(now);
             }
         }
-        return quotationRepository.save(quotation);
+        Quotation saved = quotationRepository.save(quotation);
+        events.record(BusinessEvents.quotationSent(saved, request.getClientId(), replaced), request.getId(),
+                BusinessEvents.Actor.professional(providerId), saved.getCreatedAt());
+        return saved;
     }
 
     /** Cotizaciones del prestador, opcionalmente de una sola solicitud, la más reciente primero. */
@@ -183,6 +191,8 @@ public class QuotationService {
             contract(request, quotation, now);
         } else {
             quotation.reject(now);
+            events.record(BusinessEvents.quotationRejected(quotation, clientId), request.getId(),
+                    BusinessEvents.Actor.client(clientId), now);
         }
         return quotation;
     }
@@ -193,10 +203,16 @@ public class QuotationService {
                 && quotation.getProviderId().equals(request.getSelectedProviderId());
     }
 
-    /** Formaliza la contratación: la solicitud pasa a {@code CONTRACTED} y se guarda lo acordado (GC-359). */
+    /**
+     * Formaliza la contratación: la solicitud pasa a {@code CONTRACTED}, se guarda lo acordado (GC-359) y se registra
+     * {@code servicio.contratado} (GC-433). Es el único lugar donde nace un contrato, así que el evento sale una sola
+     * vez aunque la aceptación se repita.
+     */
     private void contract(ServiceRequest request, Quotation quotation, Instant now) {
         request.contract(now);
-        contractService.formalize(request, quotation, now);
+        ServiceContract contract = contractService.formalize(request, quotation, now);
+        events.record(BusinessEvents.serviceContracted(contract), request.getId(),
+                BusinessEvents.Actor.client(request.getClientId()), contract.getContractedAt());
     }
 
     /** El instante con el que se calcula, al responder, si una cotización enviada ya venció. */
