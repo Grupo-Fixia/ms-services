@@ -4,6 +4,7 @@ import com.fixia.services.domain.ServiceRequest;
 import com.fixia.services.dto.ApplicantResponse;
 import com.fixia.services.dto.CreateServiceRequestRequest;
 import com.fixia.services.dto.ServiceRequestResponse;
+import com.fixia.services.service.ApplicantService;
 import com.fixia.services.service.ServiceRequestService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -34,9 +35,11 @@ public class ServiceRequestController {
     private static final String SUBJECT_PREFIX = "usr_";
 
     private final ServiceRequestService service;
+    private final ApplicantService applicantService;
 
-    public ServiceRequestController(ServiceRequestService service) {
+    public ServiceRequestController(ServiceRequestService service, ApplicantService applicantService) {
         this.service = service;
+        this.applicantService = applicantService;
     }
 
     @PostMapping
@@ -58,10 +61,15 @@ public class ServiceRequestController {
         return ServiceRequestResponse.from(service.get(clientId(jwt), id));
     }
 
-    /** Prestadores postulados a una solicitud propia y el estado de cada postulación (GC-347). */
+    /**
+     * Prestadores postulados a una solicitud propia, el estado de cada postulación (GC-347) y el precio y el perfil
+     * público de cada prestador (GC-423, GC-425), para compararlos antes de seleccionar.
+     */
     @GetMapping("/{id}/applications")
     public List<ApplicantResponse> applicants(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
-        return service.listApplicants(clientId(jwt), id).stream().map(ApplicantResponse::from).toList();
+        return applicantService.list(clientId(jwt), id).stream()
+                .map(view -> ApplicantResponse.from(view.application(), view.profile()))
+                .toList();
     }
 
     /**
