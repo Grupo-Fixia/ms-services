@@ -279,3 +279,16 @@ de la solicitud (`CONTRACTED`); no se duplica en la contratación.
 
 La respuesta (`Contract`) trae lo acordado y un resumen de la solicitud con `exactLocation`; no trae datos de contacto (el
 cliente y el prestador llegan como UUID de ms-users).
+
+## Eventos de negocio (GC-436)
+
+Contrato de los hechos que ms-services publica en Kafka: [docs/events/README.md](docs/events/README.md), con los
+esquemas JSON en `docs/events/schemas` y un flujo completo de ejemplo en `docs/events/examples`.
+
+- Eventos completos (payload autosuficiente), uno por cambio real de estado: `solicitud.publicada`,
+  `postulacion.registrada`, `prestador.seleccionado`, `cotizacion.enviada`, `cotizacion.rechazada` y
+  `servicio.contratado`.
+- Tópico `fixia.services.service-requests`, con el id de la solicitud como clave y una secuencia por solicitud.
+- Se escriben en un Outbox en la misma transacción (GC-433) y un relay los publica (GC-434); el lakehouse los
+  conserva en RustFS de forma idempotente por `eventId` (GC-435).
+- Todavía no se publica ningún evento: el Outbox llega con GC-433.
