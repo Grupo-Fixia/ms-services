@@ -1,6 +1,7 @@
 package com.fixia.services.controller;
 
 import com.fixia.services.client.TechnicianEligibilityClient;
+import com.fixia.services.client.TechnicianProfileClient;
 import com.fixia.services.domain.ApplicationStatus;
 import com.fixia.services.domain.ApproximateLocation;
 import com.fixia.services.domain.CurrencyCode;
@@ -80,6 +81,9 @@ class SelectProviderControllerTest {
 
     @MockBean
     private TechnicianEligibilityClient eligibilityClient;
+
+    @MockBean
+    private TechnicianProfileClient profileClient;
 
     @BeforeEach
     void cleanDatabase() {
