@@ -175,8 +175,8 @@ escribe el contenido del evento en los logs (solo `eventId`, `eventType` y la se
 
 ## 10. Outbox en `ms-services` (para GC-433 y GC-434)
 
-Tabla `outbox_events` en la base de `ms-services`. El número de migración se asigna al implementarla (la V7 está
-reservada para el presupuesto de GC-421).
+Tabla `outbox_events` en la base de `ms-services`, migración V7 (GC-433). El presupuesto de GC-421 usa la migración
+siguiente libre.
 
 | Columna | Tipo | Parte | Regla |
 | --- | --- | --- | --- |
@@ -188,7 +188,7 @@ reservada para el presupuesto de GC-421).
 | `aggregate_sequence` | BIGINT | Hecho | Único junto con `aggregate_id` |
 | `topic` | VARCHAR(120) | Hecho | `fixia.services.service-requests` |
 | `message_key` | VARCHAR(60) | Hecho | El id de la solicitud |
-| `payload` | TEXT | Hecho | El sobre completo en JSON, tal como se publicará |
+| `payload` | VARCHAR(16000) | Hecho | El sobre completo en JSON, tal como se publicará. El más grande posible (descripción, alcance y condiciones de 2000 caracteres cada uno) cabe con holgura |
 | `occurred_at` | TIMESTAMP WITH TIME ZONE | Hecho | |
 | `status` | VARCHAR(20) | Envío (lo actualiza el relay) | `PENDING`, `PUBLISHED` o `FAILED` |
 | `attempts` | INTEGER | Envío | Intentos de publicación |
@@ -202,7 +202,8 @@ pendiente.
 **Reglas del Outbox (GC-433):**
 
 1. El evento se escribe en la misma transacción que el cambio de negocio, con el mismo instante (`occurredAt`). Si la
-   transacción se revierte, el evento tampoco existe.
+   transacción se revierte, el evento tampoco existe. El reloj del servicio tiene precisión de microsegundos, la misma
+   de la base, para que el instante del evento sea idéntico al que queda guardado.
 2. El sobre se arma con los datos ya confirmados por el dominio y se valida contra su esquema en las pruebas.
 3. Las columnas del hecho no se modifican nunca; el relay solo toca las de envío.
 

@@ -291,4 +291,9 @@ esquemas JSON en `docs/events/schemas` y un flujo completo de ejemplo en `docs/e
 - Tópico `fixia.services.service-requests`, con el id de la solicitud como clave y una secuencia por solicitud.
 - Se escriben en un Outbox en la misma transacción (GC-433) y un relay los publica (GC-434); el lakehouse los
   conserva en RustFS de forma idempotente por `eventId` (GC-435).
-- Todavía no se publica ningún evento: el Outbox llega con GC-433.
+- **Outbox (GC-433):** cada operación que cambia el estado escribe su evento en `outbox_events` (migración V7) en la
+  misma transacción, con `BusinessEventRecorder` (exige una transacción activa). Si la operación se revierte, no
+  queda evento; un reintento sin cambio no escribe otro. La secuencia se asigna con la solicitud bloqueada y la base la
+  protege con `uk_outbox_aggregate_sequence`. Los eventos quedan `PENDING` hasta que el relay (GC-434) los publique.
+- Las pruebas validan cada evento producido contra `docs/events/schemas`: si el código y el contrato se separan,
+  fallan.
