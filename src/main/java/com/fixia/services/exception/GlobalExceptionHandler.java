@@ -1,6 +1,7 @@
 package com.fixia.services.exception;
 
 import com.fixia.services.client.EligibilityCheckException;
+import com.fixia.services.client.ProfileLookupException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -100,6 +101,15 @@ public class GlobalExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
                 "No fue posible verificar tu elegibilidad. Intenta de nuevo en unos minutos");
         problem.setTitle("Elegibilidad no verificable");
+        return problem;
+    }
+
+    /** Sin perfiles de ms-users no se muestran postulantes a medias ni con datos inventados (GC-425). */
+    @ExceptionHandler(ProfileLookupException.class)
+    public ProblemDetail handleProfilesUnavailable(ProfileLookupException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
+                "No fue posible consultar el perfil de los postulantes. Intenta de nuevo en unos minutos");
+        problem.setTitle("Perfiles no disponibles");
         return problem;
     }
 

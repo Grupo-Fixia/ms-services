@@ -103,11 +103,11 @@ devuelve hasta que la solicitud está `CONTRACTED`.
   `proposed_amount` y `currency` (migración V6), en `NULL` para las postulaciones anteriores, que se devuelven sin
   precio en lugar de uno inventado. La restricción `ck_applications_proposed_price` exige ambos o ninguno.
 
-## Postulantes de una solicitud (GC-347)
+## Postulantes de una solicitud (GC-347, GC-425)
 
 | Método y ruta | Descripción |
 |---|---|
-| `GET /api/services/requests/{id}/applications` | Prestadores postulados a una solicitud mía y el estado de cada postulación |
+| `GET /api/services/requests/{id}/applications` | Prestadores postulados a una solicitud mía, con el estado, el precio y el perfil público de cada uno |
 
 - Solo `ROLE_CLIENT`. La solicitud debe ser del cliente del token: si no existe, es de otro cliente o el `id` no es
   un UUID, la respuesta es la misma (404 "No existe la solicitud indicada").
@@ -115,7 +115,14 @@ devuelve hasta que la solicitud está `CONTRACTED`.
   ahora. Se puede consultar en cualquier estado de la solicitud, para ver también a quién se eligió.
 - Cada elemento trae `id`, `providerId`, `status` (`APPLIED`, `SELECTED` o `REJECTED`), `proposedAmount` y
   `currency` (el precio que propuso, GC-423; `null` en postulaciones anteriores), `createdAt` y `updatedAt`.
-  No incluye datos de la solicitud ni ubicación. El perfil público del prestador se consulta aparte (GC-350).
+  No incluye datos de la solicitud ni ubicación.
+- **Perfil público del prestador (GC-425):** cada elemento trae `provider` con `displayName` (nombre e inicial del
+  apellido), `verificationStatus`, `categories`, `professionalDescription`, `yearsOfExperience` y `city`. ms-services
+  no guarda esos datos: los pide a ms-users en `POST /internal/technicians/public-profiles` (por lotes de 100, con la
+  `INTERNAL_API_KEY`), después de leer las postulaciones y fuera de la transacción. Sin postulantes no se consulta a
+  ms-users. Un prestador que ms-users ya no reconoce como técnico activo sale con `provider: null`; si ms-users no
+  responde, 503 "Perfiles no disponibles" (no se muestran perfiles a medias ni inventados). Nunca se entregan correo,
+  teléfono, documento ni ubicación del prestador.
 
 ## Selección de prestador (GC-348)
 
