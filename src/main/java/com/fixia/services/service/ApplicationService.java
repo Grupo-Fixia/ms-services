@@ -36,16 +36,18 @@ public class ApplicationService {
     private final ServiceRequestRepository serviceRequestRepository;
     private final ServiceRequestApplicationRepository applicationRepository;
     private final TechnicianEligibilityClient eligibilityClient;
+    private final BusinessEventRecorder events;
     private final TransactionTemplate transactionTemplate;
     private final Clock clock;
 
     public ApplicationService(ServiceRequestRepository serviceRequestRepository,
                               ServiceRequestApplicationRepository applicationRepository,
-                              TechnicianEligibilityClient eligibilityClient,
+                              TechnicianEligibilityClient eligibilityClient, BusinessEventRecorder events,
                               TransactionTemplate transactionTemplate, Clock clock) {
         this.serviceRequestRepository = serviceRequestRepository;
         this.applicationRepository = applicationRepository;
         this.eligibilityClient = eligibilityClient;
+        this.events = events;
         this.transactionTemplate = transactionTemplate;
         this.clock = clock;
     }
@@ -63,6 +65,7 @@ public class ApplicationService {
      *       postulación previa: así una postulación no entra justo cuando el cliente selecciona prestador (GC-348) y
      *       dos peticiones simultáneas del mismo técnico (doble clic) dejan una sola. Si aun así la base rechaza el
      *       duplicado por la restricción única, se responde el mismo 409.
+     *   <li>En esa misma transacción se registra {@code postulacion.registrada} en el Outbox (GC-433).
      * </ol>
      */
     public ServiceRequestApplication apply(UUID providerId, UUID serviceRequestId, BigDecimal proposedAmount,
@@ -83,14 +86,18 @@ public class ApplicationService {
             ServiceRequestApplication application = ServiceRequestApplication.submit(locked, providerId,
                     proposedAmount, currency, clock.instant());
             rejectIfAlreadyApplied(serviceRequestId, providerId);
+            ServiceRequestApplication saved;
             try {
-                return applicationRepository.saveAndFlush(application);
+                saved = applicationRepository.saveAndFlush(application);
             } catch (DataIntegrityViolationException e) {
                 if (isDuplicate(e)) {
                     throw new DuplicateApplicationException(null);
                 }
                 throw e;
             }
+            events.record(BusinessEvents.applicationRegistered(saved), serviceRequestId,
+                    BusinessEvents.Actor.professional(providerId), saved.getCreatedAt());
+            return saved;
         });
     }
 

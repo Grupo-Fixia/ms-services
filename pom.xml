@@ -92,6 +92,13 @@
             <artifactId>h2</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Valida en las pruebas cada evento del Outbox contra los esquemas de docs/events (GC-433, GC-436) -->
+        <dependency>
+            <groupId>com.networknt</groupId>
+            <artifactId>json-schema-validator</artifactId>
+            <version>1.5.1</version>
+            <scope>test</scope>
+        </dependency>
 
     </dependencies>
 

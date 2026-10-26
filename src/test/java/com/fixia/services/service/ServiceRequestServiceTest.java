@@ -48,8 +48,9 @@ class ServiceRequestServiceTest {
     private final ServiceRequestRepository repository = mock(ServiceRequestRepository.class);
     private final ServiceRequestApplicationRepository applicationRepository =
             mock(ServiceRequestApplicationRepository.class);
-    private final ServiceRequestService service =
-            new ServiceRequestService(repository, applicationRepository, Clock.fixed(NOW, ZoneOffset.UTC));
+    private final BusinessEventRecorder events = mock(BusinessEventRecorder.class);
+    private final ServiceRequestService service = new ServiceRequestService(repository, applicationRepository,
+            events, Clock.fixed(NOW, ZoneOffset.UTC));
 
     private static CreateServiceRequestRequest request(Instant expectedAt) {
         return new CreateServiceRequestRequest(ServiceCategory.PLUMBING, "Fuga de agua",

@@ -26,16 +26,22 @@ public class ServiceRequestService {
 
     private final ServiceRequestRepository repository;
     private final ServiceRequestApplicationRepository applicationRepository;
+    private final BusinessEventRecorder events;
     private final Clock clock;
 
     public ServiceRequestService(ServiceRequestRepository repository,
-                                 ServiceRequestApplicationRepository applicationRepository, Clock clock) {
+                                 ServiceRequestApplicationRepository applicationRepository,
+                                 BusinessEventRecorder events, Clock clock) {
         this.repository = repository;
         this.applicationRepository = applicationRepository;
+        this.events = events;
         this.clock = clock;
     }
 
-    /** Publica una solicitud nueva del cliente, en estado PUBLISHED. */
+    /**
+     * Publica una solicitud nueva del cliente, en estado PUBLISHED, y registra {@code solicitud.publicada} en la misma
+     * transacción (GC-433).
+     */
     @Transactional
     public ServiceRequest create(UUID clientId, CreateServiceRequestRequest request) {
         ApproximateLocation approximate = new ApproximateLocation(
@@ -54,7 +60,10 @@ public class ServiceRequestService {
             // al reloj del servicio). El mensaje es propio y no incluye datos del cliente.
             throw new InvalidServiceRequestException(e.getMessage(), e);
         }
-        return repository.save(serviceRequest);
+        ServiceRequest saved = repository.save(serviceRequest);
+        events.record(BusinessEvents.requestPublished(saved), saved.getId(), BusinessEvents.Actor.client(clientId),
+                saved.getPublishedAt());
+        return saved;
     }
 
     /** Solicitud del cliente. Si no existe o es de otro cliente, la respuesta es la misma. */
@@ -116,9 +125,14 @@ public class ServiceRequestService {
                 .findFirst()
                 .orElseThrow(ApplicationNotFoundException::new);
 
+        List<ServiceRequestApplication> rejected = applications.stream()
+                .filter(application -> application != chosen).toList();
         chosen.select(now);
-        applications.stream().filter(application -> application != chosen).forEach(application -> application.reject(now));
+        rejected.forEach(application -> application.reject(now));
         request.selectProvider(chosen.getProviderId(), now);
+        // Solo hay evento cuando la selección ocurre; el reintento de arriba no publica nada (GC-433).
+        events.record(BusinessEvents.providerSelected(request, chosen, rejected, now), request.getId(),
+                BusinessEvents.Actor.client(clientId), now);
         request.getPhotoKeys();
         return request;
     }
