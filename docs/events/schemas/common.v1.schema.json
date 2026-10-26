@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fixia.local/schemas/events/common.v1.schema.json",
+  "title": "Tipos comunes de los eventos de Fixia",
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "format": "uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "instant": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$",
+      "description": "Instante en UTC, ISO-8601 con Z (por ejemplo 2026-10-26T15:00:00Z), como lo escribe Instant.toString() en Java. El patrón se exige aunque el validador no revise formatos."
+    },
+    "money": {
+      "type": "object",
+      "description": "Valor monetario. El importe viaja como texto decimal con dos decimales para que ningún consumidor lo convierta a punto flotante (RD-02, RF-073).",
+      "required": [
+        "amount",
+        "currency"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "amount": {
+          "type": "string",
+          "pattern": "^(0\\.(0[1-9]|[1-9][0-9])|[1-9][0-9]{0,9}\\.[0-9]{2})$",
+          "description": "Mayor que cero, máximo 9999999999.99, siempre con dos decimales."
+        },
+        "currency": {
+          "type": "string",
+          "enum": [
+            "COP"
+          ]
+        }
+      }
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "PLUMBING",
+        "ELECTRICAL",
+        "MAINTENANCE",
+        "LOCKSMITHING",
+        "PAINTING",
+        "CARPENTRY"
+      ]
+    }
+  }
+}

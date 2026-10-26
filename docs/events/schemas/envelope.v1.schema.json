@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fixia.local/schemas/events/envelope.v1.schema.json",
+  "title": "Sobre común de un evento de negocio de ms-services",
+  "description": "Todo evento publicado en Kafka lleva este sobre. Los datos del hecho van en data, según el esquema de su eventType y schemaVersion.",
+  "type": "object",
+  "required": [
+    "eventId",
+    "eventType",
+    "schemaVersion",
+    "occurredAt",
+    "producer",
+    "aggregate",
+    "correlationId",
+    "actor",
+    "data"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "eventId": {
+      "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid",
+      "description": "Identidad del evento. Se genera al escribirlo en el Outbox y no cambia en reintentos ni reentregas: es la clave de idempotencia de los consumidores."
+    },
+    "eventType": {
+      "type": "string",
+      "enum": [
+        "solicitud.publicada",
+        "postulacion.registrada",
+        "prestador.seleccionado",
+        "cotizacion.enviada",
+        "cotizacion.rechazada",
+        "servicio.contratado"
+      ]
+    },
+    "schemaVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "occurredAt": {
+      "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/instant",
+      "description": "Instante del hecho de negocio (el mismo reloj de la transacción)."
+    },
+    "producer": {
+      "const": "ms-services"
+    },
+    "aggregate": {
+      "type": "object",
+      "required": [
+        "type",
+        "id",
+        "sequence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "ServiceRequest"
+        },
+        "id": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid",
+          "description": "service_requests.id; también es la clave del mensaje."
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Posición del hecho en la historia de la solicitud: 1, 2, 3... sin huecos ni repetidos. La asigna ms-services en la misma transacción, con la solicitud bloqueada."
+        }
+      }
+    },
+    "correlationId": {
+      "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid",
+      "description": "Id de la solicitud de servicio a la que pertenece el hecho. Otros productores (pagos, evaluaciones) usarán el mismo valor para enlazar sus eventos con este servicio."
+    },
+    "actor": {
+      "type": "object",
+      "required": [
+        "userId",
+        "role"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "userId": {
+          "oneOf": [
+            {
+              "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "users.id de quien hizo la operación; null si fue el sistema."
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "CLIENT",
+            "PROFESSIONAL",
+            "SYSTEM"
+          ]
+        }
+      }
+    },
+    "data": {
+      "type": "object"
+    }
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fixia.local/schemas/events/solicitud.publicada.v1.schema.json",
+  "title": "solicitud.publicada (versión 1)",
+  "description": "El cliente publicó una solicitud de servicio (RF-020). Solo la ubicación aproximada: la dirección exacta y las fotografías no viajan (RF-021, CA-19).",
+  "allOf": [
+    {
+      "$ref": "https://fixia.local/schemas/events/envelope.v1.schema.json"
+    }
+  ],
+  "properties": {
+    "eventType": {
+      "const": "solicitud.publicada"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "actor": {
+      "properties": {
+        "role": {
+          "const": "CLIENT"
+        }
+      }
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "serviceRequestId",
+        "clientId",
+        "category",
+        "description",
+        "approximateLocation",
+        "expectedAt",
+        "publishedAt",
+        "status",
+        "photoCount"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "serviceRequestId": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
+        },
+        "clientId": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
+        },
+        "category": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/category"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000
+        },
+        "approximateLocation": {
+          "type": "object",
+          "required": [
+            "city",
+            "zone",
+            "latitude",
+            "longitude"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "city": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "zone": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100
+            },
+            "latitude": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": -90,
+              "maximum": 90
+            },
+            "longitude": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": -180,
+              "maximum": 180
+            }
+          }
+        },
+        "expectedAt": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/instant"
+        },
+        "publishedAt": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/instant"
+        },
+        "status": {
+          "const": "PUBLISHED"
+        },
+        "photoCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5
+        }
+      }
+    }
+  }
+}
