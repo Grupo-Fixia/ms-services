@@ -47,7 +47,8 @@ class ApplicationServiceDuplicateTest {
     private final ServiceRequestApplicationRepository applications = mock(ServiceRequestApplicationRepository.class);
     private final TechnicianEligibilityClient eligibility = mock(TechnicianEligibilityClient.class);
     private final TransactionTemplate transactions = mock(TransactionTemplate.class);
-    private final ApplicationService service = new ApplicationService(requests, applications, eligibility,
+    private final BusinessEventRecorder events = mock(BusinessEventRecorder.class);
+    private final ApplicationService service = new ApplicationService(requests, applications, eligibility, events,
             transactions, Clock.fixed(NOW, ZoneOffset.UTC));
 
     private ServiceRequest request;
