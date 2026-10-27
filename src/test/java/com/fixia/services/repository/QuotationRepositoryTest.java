@@ -62,7 +62,7 @@ class QuotationRepositoryTest {
         Instant now = now();
         ServiceRequest request = serviceRequestRepository.saveAndFlush(ServiceRequest.publish(UUID.randomUUID(),
                 ServiceCategory.PLUMBING, "Fuga de agua en el baño", new ApproximateLocation("Bogotá", "Chapinero"),
-                null, now.plus(Duration.ofDays(5)), List.of(), now));
+                null, now.plus(Duration.ofDays(5)), new BigDecimal("200000"), CurrencyCode.COP, List.of(), now));
         return transactionTemplate.execute(status -> {
             ServiceRequest found = serviceRequestRepository.findById(request.getId()).orElseThrow();
             found.selectProvider(PROVIDER, now());

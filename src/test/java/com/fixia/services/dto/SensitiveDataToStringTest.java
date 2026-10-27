@@ -18,11 +18,12 @@ class SensitiveDataToStringTest {
     void laSolicitudDeCreacionNoImprimeDescripcionNiDirecciones() {
         CreateServiceRequestRequest request = new CreateServiceRequestRequest(ServiceCategory.PLUMBING,
                 "Descripción privada", new ApproximateLocationRequest("Bogotá", "Chapinero", 4.6, -74.0),
-                new ExactLocationRequest("Calle 10 # 5-20", 4.7, -74.1), Instant.now(), List.of("a.jpg"));
+                new ExactLocationRequest("Calle 10 # 5-20", 4.7, -74.1), Instant.now(),
+                new BigDecimal("234567.89"), CurrencyCode.COP, List.of("a.jpg"));
 
         assertThat(request.toString())
                 .contains("PLUMBING")
-                .doesNotContain("Descripción privada", "Calle 10", "Chapinero", "Bogotá", "a.jpg");
+                .doesNotContain("Descripción privada", "Calle 10", "Chapinero", "Bogotá", "a.jpg", "234567");
     }
 
     @Test

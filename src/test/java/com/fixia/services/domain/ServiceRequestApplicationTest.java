@@ -25,7 +25,8 @@ class ServiceRequestApplicationTest {
     private static ServiceRequest publishedRequest() {
         ServiceRequest request = ServiceRequest.publish(UUID.randomUUID(), ServiceCategory.PLUMBING,
                 "Fuga de agua en el baño", new ApproximateLocation("Bogotá", "Chapinero"), null,
-                NOW.plus(Duration.ofDays(2)), List.of(), NOW.minusSeconds(3600));
+                NOW.plus(Duration.ofDays(2)),
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), NOW.minusSeconds(3600));
         ReflectionTestUtils.setField(request, "id", UUID.randomUUID());
         return request;
     }

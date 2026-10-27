@@ -5,6 +5,7 @@ import com.fixia.services.client.EligibilityCheckException;
 import com.fixia.services.client.TechnicianEligibilityClient;
 import com.fixia.services.domain.ApplicationStatus;
 import com.fixia.services.domain.ApproximateLocation;
+import com.fixia.services.domain.CurrencyCode;
 import com.fixia.services.domain.ExactLocation;
 import com.fixia.services.domain.ServiceCategory;
 import com.fixia.services.domain.ServiceRequest;
@@ -96,7 +97,8 @@ class ApplicationControllerTest {
         return serviceRequestRepository.saveAndFlush(ServiceRequest.publish(UUID.randomUUID(),
                 ServiceCategory.PLUMBING, "Fuga de agua en el baño",
                 new ApproximateLocation("Bogotá", "Chapinero", 4.6533, -74.0836),
-                new ExactLocation("Calle 10 # 5-20, apto 301"), now.plus(Duration.ofDays(2)), List.of(), now));
+                new ExactLocation("Calle 10 # 5-20, apto 301"), now.plus(Duration.ofDays(2)),
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), now));
     }
 
     private void eligible() {

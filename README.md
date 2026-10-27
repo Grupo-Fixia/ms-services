@@ -59,8 +59,8 @@ devuelve hasta que la solicitud está `CONTRACTED`.
   por lotes de 100 (el máximo de esa consulta). Es la misma regla que se aplica al postularse (GC-342), así que una
   oportunidad listada es una a la que el técnico puede postularse.
 - **Respuesta:** `{ "items": [...], "nextCursor": "..." | null }`. Cada elemento trae `id`, `category`, `description`,
-  `city`, `zone`, `latitude`, `longitude` (aproximadas), `expectedAt` y `publishedAt`; no incluye al cliente, la dirección
-  exacta ni las fotos.
+  `city`, `zone`, `latitude`, `longitude` (aproximadas), `expectedAt`, `budgetAmount` y `budgetCurrency` (el presupuesto
+  orientativo del cliente, GC-421) y `publishedAt`; no incluye al cliente, la dirección exacta ni las fotos.
 - **Parámetros.** `limit`: de 1 a 50, por defecto 20. `cursor`: el `nextCursor` de la página anterior. Un valor que no se
   pueda interpretar da 400 "Consulta inválida".
 - **Paginación por cursor.** El orden es `publishedAt` descendente y, en empate, `id` descendente; el cursor es la clave de
@@ -188,6 +188,41 @@ GC-301.
 - Nombre `ServiceRequest` (Jira: "solicitud") frente a `SERVICIO` en el DD V3.
 - Las categorías se redefinen aquí con los mismos valores que `ms-users`.
 - Las fotos guardan la clave del objeto en el almacenamiento, no la URL.
+
+## Presupuesto orientativo (GC-421)
+
+El cliente indica un presupuesto al publicar (RF-020). Es un **valor único en COP, obligatorio, mayor que cero y solo
+orientativo**: guía al prestador, pero no es un pago, un límite ni el precio de la postulación, la cotización o el contrato.
+
+`POST /api/services/requests` (solo `ROLE_CLIENT`) agrega dos campos planos, igual que `proposedAmount` / `currency`:
+
+```json
+{
+  "category": "PLUMBING",
+  "description": "Fuga de agua debajo del lavamanos",
+  "approximateLocation": { "city": "Bogotá", "zone": "Chapinero", "latitude": 4.6533, "longitude": -74.0836 },
+  "exactLocation": { "address": "Calle 10 # 5-20, apto 301", "latitude": 4.711, "longitude": -74.0721 },
+  "expectedAt": "2026-10-30T15:00:00Z",
+  "budgetAmount": 200000,
+  "budgetCurrency": "COP",
+  "photoKeys": ["requests/a.jpg"]
+}
+```
+
+Las respuestas (`201` al publicar, `GET /api/services/requests`, `GET /api/services/requests/{id}` y cada elemento de
+`GET /api/services/opportunities`) devuelven los mismos dos campos, con el importe a **dos decimales**:
+
+```json
+{ "budgetAmount": 200000.00, "budgetCurrency": "COP" }
+```
+
+- **Validaciones (400 con `errors[]`).** `budgetAmount` obligatorio, mayor que cero, hasta 10 enteros y 2 decimales (máximo
+  `9999999999.99`); `budgetCurrency` obligatoria y solo `COP`. Una moneda desconocida da 400 "Solicitud inválida".
+- **Solicitudes anteriores.** Las publicadas antes de la migración V8 devuelven `budgetAmount: null` y
+  `budgetCurrency: null`; no se les inventó ningún importe. La base exige que ambos campos sean nulos o ambos válidos.
+- **Evento.** `solicitud.publicada` lleva `budget` (`{ "amount": "200000.00", "currency": "COP" }`, como texto decimal) en un
+  campo opcional; sigue en la versión 1.
+- **Privacidad.** El presupuesto no cambia lo que ve cada rol: la dirección exacta sigue protegida hasta la contratación.
 
 ## Cotización (GC-353)
 

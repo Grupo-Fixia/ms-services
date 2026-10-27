@@ -87,7 +87,8 @@ class QuotationControllerTest {
     private ServiceRequest published(UUID clientId) {
         Instant now = Instant.now();
         return ServiceRequest.publish(clientId, ServiceCategory.PLUMBING, "Fuga de agua en el baño",
-                new ApproximateLocation("Bogotá", "Chapinero"), null, now.plus(Duration.ofDays(5)), List.of(), now);
+                new ApproximateLocation("Bogotá", "Chapinero"), null, now.plus(Duration.ofDays(5)),
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), now);
     }
 
     /** Solicitud del cliente con el prestador ya seleccionado (lo que deja GC-348). */

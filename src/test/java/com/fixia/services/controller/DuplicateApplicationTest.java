@@ -3,6 +3,7 @@ package com.fixia.services.controller;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fixia.services.client.TechnicianEligibilityClient;
 import com.fixia.services.domain.ApproximateLocation;
+import com.fixia.services.domain.CurrencyCode;
 import com.fixia.services.domain.ServiceCategory;
 import com.fixia.services.domain.ServiceRequest;
 import com.fixia.services.repository.ServiceRequestApplicationRepository;
@@ -21,6 +22,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -81,7 +83,7 @@ class DuplicateApplicationTest {
         Instant now = Instant.now();
         return serviceRequestRepository.saveAndFlush(ServiceRequest.publish(UUID.randomUUID(),
                 ServiceCategory.PLUMBING, "Fuga de agua en el baño", new ApproximateLocation("Bogotá", "Chapinero"),
-                null, now.plus(Duration.ofDays(2)), List.of(), now));
+                null, now.plus(Duration.ofDays(2)), new BigDecimal("200000"), CurrencyCode.COP, List.of(), now));
     }
 
     private ResultActions apply(UUID technician, UUID serviceRequestId) throws Exception {

@@ -3,6 +3,7 @@ package com.fixia.services.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fixia.services.client.TechnicianEligibilityClient;
 import com.fixia.services.domain.ApproximateLocation;
+import com.fixia.services.domain.CurrencyCode;
 import com.fixia.services.domain.OutboxEvent;
 import com.fixia.services.domain.ServiceCategory;
 import com.fixia.services.domain.ServiceRequest;
@@ -79,7 +80,7 @@ class BusinessEventRecorderTest {
         Instant now = Instant.now();
         return serviceRequestRepository.saveAndFlush(ServiceRequest.publish(UUID.randomUUID(),
                 ServiceCategory.PLUMBING, "Fuga de agua", new ApproximateLocation("Bogotá", "Chapinero"), null,
-                now.plus(Duration.ofDays(2)), List.of(), now));
+                now.plus(Duration.ofDays(2)), new BigDecimal("200000"), CurrencyCode.COP, List.of(), now));
     }
 
     private OutboxEvent record(ServiceRequest request) {
@@ -119,6 +120,18 @@ class BusinessEventRecorderTest {
         assertThat(found.getAggregateSequence()).isEqualTo(1);
         assertThat(found.getSchemaVersion()).isEqualTo((short) 1);
         assertThat(EventContract.violations(objectMapper.readTree(found.getPayload()))).isEmpty();
+    }
+
+    @Test
+    void laSolicitudPublicadaLlevaElPresupuestoOrientativoComoTextoDecimal() throws Exception {
+        ServiceRequest request = publishedRequest();
+
+        OutboxEvent saved = transactionTemplate.execute(status -> record(request));
+
+        var budget = objectMapper.readTree(outboxRepository.findById(saved.getEventId()).orElseThrow().getPayload())
+                .at("/data/budget");
+        assertThat(budget.get("amount").asText()).isEqualTo("200000.00");
+        assertThat(budget.get("currency").asText()).isEqualTo("COP");
     }
 
     @Test

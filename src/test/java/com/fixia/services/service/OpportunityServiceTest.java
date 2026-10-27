@@ -3,6 +3,7 @@ package com.fixia.services.service;
 import com.fixia.services.client.EligibilityCheckException;
 import com.fixia.services.client.TechnicianEligibilityClient;
 import com.fixia.services.domain.ApproximateLocation;
+import com.fixia.services.domain.CurrencyCode;
 import com.fixia.services.domain.ServiceCategory;
 import com.fixia.services.domain.ServiceRequest;
 import com.fixia.services.repository.ServiceRequestRepository;
@@ -13,6 +14,7 @@ import org.springframework.data.domain.Slice;
 import org.springframework.data.domain.SliceImpl;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -52,7 +54,8 @@ class OpportunityServiceTest {
     /** Solicitud número {@code index}: más pequeño = más reciente. */
     private static ServiceRequest request(int index) {
         ServiceRequest request = ServiceRequest.publish(UUID.randomUUID(), ServiceCategory.PLUMBING, "Fuga",
-                new ApproximateLocation("Bogotá", "Chapinero"), null, NOW.plusSeconds(3600), List.of(),
+                new ApproximateLocation("Bogotá", "Chapinero"), null, NOW.plusSeconds(3600),
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(),
                 NOW.minusSeconds(60));
         ReflectionTestUtils.setField(request, "id", UUID.randomUUID());
         ReflectionTestUtils.setField(request, "publishedAt", NOW.minusSeconds(60 + index));

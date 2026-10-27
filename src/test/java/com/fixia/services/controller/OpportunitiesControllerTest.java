@@ -19,6 +19,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
@@ -76,6 +77,9 @@ class OpportunitiesControllerTest {
     @Autowired
     private ServiceRequestApplicationRepository applicationRepository;
 
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
     @MockBean
     private TechnicianEligibilityClient eligibilityClient;
 
@@ -91,6 +95,7 @@ class OpportunitiesControllerTest {
         return serviceRequestRepository.saveAndFlush(ServiceRequest.publish(UUID.randomUUID(), category,
                 "Fuga de agua en el baño", new ApproximateLocation(city, "Chapinero", 4.6533, -74.0836),
                 new ExactLocation("Calle 10 # 5-20, apto 301"), publishedAt.plus(Duration.ofDays(2)),
+                new BigDecimal("200000"), CurrencyCode.COP,
                 List.of("requests/a.jpg"), publishedAt));
     }
 
@@ -125,6 +130,29 @@ class OpportunitiesControllerTest {
     }
 
     // ---------- Consultar ----------
+
+    @Test
+    void cadaOportunidadMuestraElPresupuestoOrientativoYLasAnterioresLoDejanNulo() throws Exception {
+        Instant now = Instant.now();
+        ServiceRequest withBudget = published(ServiceCategory.PLUMBING, "Bogotá", now.minusSeconds(60));
+        ServiceRequest historic = published(ServiceCategory.PLUMBING, "Bogotá", now.minusSeconds(120));
+        jdbcTemplate.update("UPDATE service_requests SET budget_amount = NULL, budget_currency = NULL WHERE id = ?",
+                historic.getId());
+        eligibleOnly(Set.of(withBudget.getId(), historic.getId()));
+
+        page("")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", hasSize(2)))
+                .andExpect(jsonPath("$.items[0].id").value(withBudget.getId().toString()))
+                .andExpect(jsonPath("$.items[0].budgetAmount").value(200000.0))
+                .andExpect(jsonPath("$.items[0].budgetCurrency").value("COP"))
+                .andExpect(jsonPath("$.items[1].id").value(historic.getId().toString()))
+                .andExpect(jsonPath("$.items[1].budgetAmount").value(nullValue()))
+                .andExpect(jsonPath("$.items[1].budgetCurrency").value(nullValue()))
+                // El presupuesto no abre la dirección exacta ni el cliente: la privacidad no cambia.
+                .andExpect(jsonPath("$.items[0].exactLocation").doesNotExist())
+                .andExpect(jsonPath("$.items[0].clientId").doesNotExist());
+    }
 
     @Test
     void devuelveSoloLasElegiblesLaMasRecientePrimeroEnUnObjetoConItemsYCursorNulo() throws Exception {

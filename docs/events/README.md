@@ -175,8 +175,8 @@ escribe el contenido del evento en los logs (solo `eventId`, `eventType` y la se
 
 ## 10. Outbox en `ms-services` (para GC-433 y GC-434)
 
-Tabla `outbox_events` en la base de `ms-services`, migración V7 (GC-433). El presupuesto de GC-421 usa la migración
-siguiente libre.
+Tabla `outbox_events` en la base de `ms-services`, migración V7 (GC-433). El presupuesto de GC-421 usa la migración V8
+(`service_requests.budget_amount` y `budget_currency`); `solicitud.publicada` lo lleva en el campo opcional `budget`.
 
 | Columna | Tipo | Parte | Regla |
 | --- | --- | --- | --- |

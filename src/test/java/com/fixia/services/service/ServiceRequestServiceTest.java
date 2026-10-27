@@ -54,7 +54,8 @@ class ServiceRequestServiceTest {
 
     private static CreateServiceRequestRequest request(Instant expectedAt) {
         return new CreateServiceRequestRequest(ServiceCategory.PLUMBING, "Fuga de agua",
-                new ApproximateLocationRequest("Bogotá", "Chapinero", null, null), null, expectedAt, List.of());
+                new ApproximateLocationRequest("Bogotá", "Chapinero", null, null), null, expectedAt,
+                new BigDecimal("200000"), CurrencyCode.COP, List.of());
     }
 
     @Test
@@ -82,7 +83,7 @@ class ServiceRequestServiceTest {
         UUID id = UUID.randomUUID();
         ServiceRequest foreign = ServiceRequest.publish(UUID.randomUUID(), ServiceCategory.PAINTING, "Pintar",
                 new ApproximateLocation("Cali", "Granada"), null,
-                NOW.plusSeconds(3600), List.of(), NOW);
+                NOW.plusSeconds(3600), new BigDecimal("200000"), CurrencyCode.COP, List.of(), NOW);
         when(repository.findById(id)).thenReturn(Optional.of(foreign));
 
         assertThatThrownBy(() -> service.get(CLIENT, id)).isInstanceOf(ServiceRequestNotFoundException.class);
@@ -236,7 +237,8 @@ class ServiceRequestServiceTest {
 
     private static ServiceRequest persisted(UUID clientId, Instant expectedAt) {
         ServiceRequest request = ServiceRequest.publish(clientId, ServiceCategory.PAINTING, "Pintar",
-                new ApproximateLocation("Cali", "Granada"), null, expectedAt, List.of(), NOW.minusSeconds(7200));
+                new ApproximateLocation("Cali", "Granada"), null, expectedAt,
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), NOW.minusSeconds(7200));
         ReflectionTestUtils.setField(request, "id", UUID.randomUUID());
         return request;
     }

@@ -104,6 +104,8 @@ class BusinessEventsFlowTest {
                 "latitude", 4.6533, "longitude", -74.0836));
         body.put("exactLocation", Map.of("address", EXACT_ADDRESS, "latitude", 4.7110, "longitude", -74.0721));
         body.put("expectedAt", Instant.now().plus(Duration.ofDays(2)).toString());
+        body.put("budgetAmount", 200000);
+        body.put("budgetCurrency", "COP");
         body.put("photoKeys", List.of("requests/a.jpg", "requests/b.jpg"));
         return idOf(send("/api/services/requests", CLIENT, "ROLE_CLIENT", body).andExpect(status().isCreated()));
     }

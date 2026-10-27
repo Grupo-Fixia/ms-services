@@ -6,6 +6,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -28,7 +29,8 @@ class ServiceRequestTest {
 
     private static ServiceRequest published() {
         return ServiceRequest.publish(CLIENT, ServiceCategory.PLUMBING, "Fuga de agua en el baño",
-                new ApproximateLocation("Bogotá", "Chapinero", 4.6533, -74.0836), EXACT, TOMORROW, List.of(), NOW);
+                new ApproximateLocation("Bogotá", "Chapinero", 4.6533, -74.0836), EXACT, TOMORROW,
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), NOW);
     }
 
     // ---- Publicación ----
@@ -37,6 +39,7 @@ class ServiceRequestTest {
     void publicarCreaLaSolicitudEnEstadoPublicada() {
         ServiceRequest request = ServiceRequest.publish(CLIENT, ServiceCategory.ELECTRICAL, "  Cambiar tomacorrientes  ",
                 new ApproximateLocation(" Medellín ", " El Poblado "), null, TOMORROW,
+                new BigDecimal("200000"), CurrencyCode.COP,
                 List.of("requests/a.jpg", "requests/b.jpg"), NOW);
 
         assertThat(request.getStatus()).isEqualTo(ServiceRequestStatus.PUBLISHED);
@@ -56,11 +59,67 @@ class ServiceRequestTest {
     @Test
     void publicarSinFotosNiDireccionExactaEsValido() {
         ServiceRequest request = ServiceRequest.publish(CLIENT, ServiceCategory.PAINTING, "Pintar sala",
-                new ApproximateLocation("Cali", "Granada"), null, TOMORROW, null, NOW);
+                new ApproximateLocation("Cali", "Granada"), null, TOMORROW,
+                new BigDecimal("200000"), CurrencyCode.COP, null, NOW);
 
         assertThat(request.getPhotoKeys()).isEmpty();
         assertThat(request.getApproximateLocation().latitude()).isNull();
         assertThat(request.getExactLocation()).isEmpty();
+    }
+
+    // ---- Presupuesto orientativo (GC-421) ----
+
+    private static ServiceRequest publishWithBudget(BigDecimal amount, CurrencyCode currency) {
+        return ServiceRequest.publish(CLIENT, ServiceCategory.PLUMBING, "Fuga de agua en el baño",
+                new ApproximateLocation("Bogotá", "Chapinero"), null, TOMORROW, amount, currency, List.of(), NOW);
+    }
+
+    @Test
+    void elPresupuestoSeGuardaConDosDecimalesYSuMoneda() {
+        ServiceRequest request = publishWithBudget(new BigDecimal("185000.5"), CurrencyCode.COP);
+
+        assertThat(request.getBudgetAmount()).isEqualTo(new BigDecimal("185000.50"));
+        assertThat(request.getBudgetAmount().scale()).isEqualTo(2);
+        assertThat(request.getBudgetCurrency()).isEqualTo(CurrencyCode.COP);
+    }
+
+    @Test
+    void unPresupuestoEnEnteroYElMaximoPermitidoSonValidos() {
+        assertThat(publishWithBudget(new BigDecimal("200000"), CurrencyCode.COP).getBudgetAmount())
+                .isEqualTo(new BigDecimal("200000.00"));
+        assertThat(publishWithBudget(new BigDecimal("9999999999.99"), CurrencyCode.COP).getBudgetAmount())
+                .isEqualTo(new BigDecimal("9999999999.99"));
+        // Ceros a la derecha no son decimales de más.
+        assertThat(publishWithBudget(new BigDecimal("1000.1000"), CurrencyCode.COP).getBudgetAmount())
+                .isEqualTo(new BigDecimal("1000.10"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"0", "0.00", "-1", "-0.01"})
+    void elPresupuestoDebeSerMayorQueCero(String amount) {
+        assertThatThrownBy(() -> publishWithBudget(new BigDecimal(amount), CurrencyCode.COP))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("El presupuesto debe ser mayor que cero");
+    }
+
+    @Test
+    void elPresupuestoNoAdmiteMasDeDosDecimalesNiSuperarElMaximo() {
+        assertThatThrownBy(() -> publishWithBudget(new BigDecimal("1000.001"), CurrencyCode.COP))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("El presupuesto admite máximo dos decimales");
+        assertThatThrownBy(() -> publishWithBudget(new BigDecimal("10000000000"), CurrencyCode.COP))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("El presupuesto no puede superar 9999999999.99");
+    }
+
+    @Test
+    void elPresupuestoYSuMonedaSonObligatorios() {
+        assertThatThrownBy(() -> publishWithBudget(null, CurrencyCode.COP))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("El presupuesto es obligatorio");
+        assertThatThrownBy(() -> publishWithBudget(new BigDecimal("200000"), null))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("La moneda del presupuesto es obligatoria");
     }
 
     @Test
@@ -76,7 +135,8 @@ class ServiceRequestTest {
     @ValueSource(strings = {"   "})
     void publicarSinDescripcionFalla(String description) {
         assertThatThrownBy(() -> ServiceRequest.publish(CLIENT, ServiceCategory.PLUMBING, description,
-                new ApproximateLocation("Bogotá", "Chapinero"), null, TOMORROW, List.of(), NOW))
+                new ApproximateLocation("Bogotá", "Chapinero"), null, TOMORROW,
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), NOW))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("descripción");
     }
@@ -86,7 +146,8 @@ class ServiceRequestTest {
         String tooLong = "x".repeat(ServiceRequest.MAX_DESCRIPTION_LENGTH + 1);
 
         assertThatThrownBy(() -> ServiceRequest.publish(CLIENT, ServiceCategory.PLUMBING, tooLong,
-                new ApproximateLocation("Bogotá", "Chapinero"), null, TOMORROW, List.of(), NOW))
+                new ApproximateLocation("Bogotá", "Chapinero"), null, TOMORROW,
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), NOW))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("2000");
     }
@@ -94,7 +155,8 @@ class ServiceRequestTest {
     @Test
     void publicarSinClienteFalla() {
         assertThatThrownBy(() -> ServiceRequest.publish(null, ServiceCategory.PLUMBING, "Fuga",
-                new ApproximateLocation("Bogotá", "Chapinero"), null, TOMORROW, List.of(), NOW))
+                new ApproximateLocation("Bogotá", "Chapinero"), null, TOMORROW,
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), NOW))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("cliente");
     }
@@ -102,7 +164,8 @@ class ServiceRequestTest {
     @Test
     void publicarSinCategoriaFalla() {
         assertThatThrownBy(() -> ServiceRequest.publish(CLIENT, null, "Fuga",
-                new ApproximateLocation("Bogotá", "Chapinero"), null, TOMORROW, List.of(), NOW))
+                new ApproximateLocation("Bogotá", "Chapinero"), null, TOMORROW,
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), NOW))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("categoría");
     }
@@ -110,7 +173,7 @@ class ServiceRequestTest {
     @Test
     void publicarSinUbicacionAproximadaFalla() {
         assertThatThrownBy(() -> ServiceRequest.publish(CLIENT, ServiceCategory.PLUMBING, "Fuga",
-                null, null, TOMORROW, List.of(), NOW))
+                null, null, TOMORROW, new BigDecimal("200000"), CurrencyCode.COP, List.of(), NOW))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("ubicación aproximada");
     }
@@ -118,11 +181,13 @@ class ServiceRequestTest {
     @Test
     void publicarSinCiudadOSinZonaFalla() {
         assertThatThrownBy(() -> ServiceRequest.publish(CLIENT, ServiceCategory.PLUMBING, "Fuga",
-                new ApproximateLocation(" ", "Chapinero"), null, TOMORROW, List.of(), NOW))
+                new ApproximateLocation(" ", "Chapinero"), null, TOMORROW,
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), NOW))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("ciudad");
         assertThatThrownBy(() -> ServiceRequest.publish(CLIENT, ServiceCategory.PLUMBING, "Fuga",
-                new ApproximateLocation("Bogotá", null), null, TOMORROW, List.of(), NOW))
+                new ApproximateLocation("Bogotá", null), null, TOMORROW,
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), NOW))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("zona");
     }
@@ -130,15 +195,18 @@ class ServiceRequestTest {
     @Test
     void publicarConCoordenadasIncompletasOFueraDeRangoFalla() {
         assertThatThrownBy(() -> ServiceRequest.publish(CLIENT, ServiceCategory.PLUMBING, "Fuga",
-                new ApproximateLocation("Bogotá", "Chapinero", 4.6, null), null, TOMORROW, List.of(), NOW))
+                new ApproximateLocation("Bogotá", "Chapinero", 4.6, null), null, TOMORROW,
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), NOW))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("completas");
         assertThatThrownBy(() -> ServiceRequest.publish(CLIENT, ServiceCategory.PLUMBING, "Fuga",
-                new ApproximateLocation("Bogotá", "Chapinero", 91.0, 0.0), null, TOMORROW, List.of(), NOW))
+                new ApproximateLocation("Bogotá", "Chapinero", 91.0, 0.0), null, TOMORROW,
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), NOW))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("latitud");
         assertThatThrownBy(() -> ServiceRequest.publish(CLIENT, ServiceCategory.PLUMBING, "Fuga",
-                new ApproximateLocation("Bogotá", "Chapinero", 0.0, 181.0), null, TOMORROW, List.of(), NOW))
+                new ApproximateLocation("Bogotá", "Chapinero", 0.0, 181.0), null, TOMORROW,
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), NOW))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("longitud");
     }
@@ -146,12 +214,13 @@ class ServiceRequestTest {
     @Test
     void publicarConDireccionExactaVaciaOCoordenadasInvalidasFalla() {
         assertThatThrownBy(() -> ServiceRequest.publish(CLIENT, ServiceCategory.PLUMBING, "Fuga",
-                new ApproximateLocation("Bogotá", "Chapinero"), new ExactLocation("  "), TOMORROW, List.of(), NOW))
+                new ApproximateLocation("Bogotá", "Chapinero"), new ExactLocation("  "), TOMORROW,
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), NOW))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("dirección exacta");
         assertThatThrownBy(() -> ServiceRequest.publish(CLIENT, ServiceCategory.PLUMBING, "Fuga",
                 new ApproximateLocation("Bogotá", "Chapinero"), new ExactLocation("Calle 1", 4.0, null),
-                TOMORROW, List.of(), NOW))
+                TOMORROW, new BigDecimal("200000"), CurrencyCode.COP, List.of(), NOW))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("exacta");
     }
@@ -159,11 +228,13 @@ class ServiceRequestTest {
     @Test
     void publicarSinMomentoEsperadoOEnElPasadoFalla() {
         assertThatThrownBy(() -> ServiceRequest.publish(CLIENT, ServiceCategory.PLUMBING, "Fuga",
-                new ApproximateLocation("Bogotá", "Chapinero"), null, null, List.of(), NOW))
+                new ApproximateLocation("Bogotá", "Chapinero"), null, null,
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), NOW))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("momento esperado");
         assertThatThrownBy(() -> ServiceRequest.publish(CLIENT, ServiceCategory.PLUMBING, "Fuga",
-                new ApproximateLocation("Bogotá", "Chapinero"), null, NOW, List.of(), NOW))
+                new ApproximateLocation("Bogotá", "Chapinero"), null, NOW,
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), NOW))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("posterior");
     }
@@ -174,7 +245,8 @@ class ServiceRequestTest {
                 .mapToObj(i -> "requests/" + i + ".jpg").toList();
 
         assertThatThrownBy(() -> ServiceRequest.publish(CLIENT, ServiceCategory.PLUMBING, "Fuga",
-                new ApproximateLocation("Bogotá", "Chapinero"), null, TOMORROW, tooMany, NOW))
+                new ApproximateLocation("Bogotá", "Chapinero"), null, TOMORROW,
+                new BigDecimal("200000"), CurrencyCode.COP, tooMany, NOW))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("fotograf");
     }
@@ -182,7 +254,8 @@ class ServiceRequestTest {
     @Test
     void publicarConUnaClaveDeFotoVaciaFalla() {
         assertThatThrownBy(() -> ServiceRequest.publish(CLIENT, ServiceCategory.PLUMBING, "Fuga",
-                new ApproximateLocation("Bogotá", "Chapinero"), null, TOMORROW, List.of("ok.jpg", " "), NOW))
+                new ApproximateLocation("Bogotá", "Chapinero"), null, TOMORROW,
+                new BigDecimal("200000"), CurrencyCode.COP, List.of("ok.jpg", " "), NOW))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("fotografía");
     }
@@ -322,7 +395,8 @@ class ServiceRequestTest {
     @Test
     void sinDireccionExactaNoHayNadaQueEntregarAunqueEsteContratada() {
         ServiceRequest request = ServiceRequest.publish(CLIENT, ServiceCategory.PAINTING, "Pintar sala",
-                new ApproximateLocation("Cali", "Granada"), null, TOMORROW, List.of(), NOW);
+                new ApproximateLocation("Cali", "Granada"), null, TOMORROW,
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), NOW);
         request.selectProvider(PROVIDER, NOW);
         request.contract(NOW);
 

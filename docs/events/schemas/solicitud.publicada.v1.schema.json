@@ -102,6 +102,10 @@
           "type": "integer",
           "minimum": 0,
           "maximum": 5
+        },
+        "budget": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/money",
+          "description": "Presupuesto orientativo del cliente (GC-421): un valor único que solo guía al prestador; no es un precio ni un pago. Opcional, así que las solicitudes publicadas antes de GC-421 y los consumidores de la versión 1 original siguen siendo válidos."
         }
       }
     }

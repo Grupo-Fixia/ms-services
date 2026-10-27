@@ -30,6 +30,9 @@ paths:
       description: |
         Crea una solicitud en estado `PUBLISHED` para el cliente autenticado. El cliente sale del token:
         un `clientId` en el cuerpo se ignora. Solo rol `ROLE_CLIENT`.
+
+        Lleva un presupuesto orientativo (GC-421): un valor único en COP, obligatorio y mayor que cero. Es solo una
+        guía para el prestador; no es un pago ni un límite, y es distinto del precio propuesto al postularse.
       security:
         - bearerAuth: []
       requestBody:
@@ -737,7 +740,7 @@ components:
 
     CreateServiceRequest:
       type: object
-      required: [category, description, approximateLocation, expectedAt]
+      required: [category, description, approximateLocation, expectedAt, budgetAmount, budgetCurrency]
       properties:
         category: { $ref: '#/components/schemas/ServiceCategory' }
         description: { type: string, maxLength: 2000, example: Fuga de agua en el baño }
@@ -763,6 +766,21 @@ components:
           format: date-time
           description: Momento esperado del servicio; debe ser posterior a la publicación.
           example: '2026-10-20T15:00:00Z'
+        budgetAmount:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          maximum: 9999999999.99
+          multipleOf: 0.01
+          description: |
+            Presupuesto orientativo (GC-421): un valor único, obligatorio y mayor que cero, con máximo dos decimales.
+            Solo guía al prestador; no es un pago ni un límite. Es distinto del precio propuesto (`proposedAmount`).
+          example: 200000
+        budgetCurrency:
+          type: string
+          enum: [COP]
+          description: Moneda del presupuesto. Por ahora solo pesos colombianos.
+          example: COP
         photoKeys:
           type: array
           maxItems: 5
@@ -793,6 +811,16 @@ components:
             latitude: { type: number, format: double, nullable: true }
             longitude: { type: number, format: double, nullable: true }
         expectedAt: { type: string, format: date-time }
+        budgetAmount:
+          type: number
+          nullable: true
+          description: Presupuesto orientativo con dos decimales (por ejemplo `200000.00`). `null` en las solicitudes anteriores a GC-421.
+          example: 200000.00
+        budgetCurrency:
+          type: string
+          nullable: true
+          enum: [COP]
+          description: Moneda del presupuesto; `null` si la solicitud no tiene presupuesto.
         photoKeys:
           type: array
           items: { type: string }
@@ -907,6 +935,12 @@ components:
         latitude: { type: number, nullable: true }
         longitude: { type: number, nullable: true }
         expectedAt: { type: string, format: date-time }
+        budgetAmount:
+          type: number
+          nullable: true
+          description: Presupuesto orientativo del cliente (GC-421), solo una guía para decidir si se postula; no es un precio. `null` en las solicitudes anteriores a él.
+          example: 200000.00
+        budgetCurrency: { type: string, nullable: true, enum: [COP] }
         publishedAt: { type: string, format: date-time }
 
     QuotationStatus:

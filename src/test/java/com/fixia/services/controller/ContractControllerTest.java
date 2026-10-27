@@ -99,7 +99,7 @@ class ContractControllerTest {
         Instant now = Instant.now();
         ServiceRequest request = ServiceRequest.publish(clientId, ServiceCategory.PLUMBING, "Fuga de agua en el baño",
                 new ApproximateLocation("Bogotá", "Chapinero", 4.6512, -74.0583), exact,
-                now.plus(Duration.ofDays(5)), List.of(), now);
+                now.plus(Duration.ofDays(5)), new BigDecimal("200000"), CurrencyCode.COP, List.of(), now);
         request.selectProvider(providerId, now);
         return serviceRequestRepository.saveAndFlush(request);
     }
