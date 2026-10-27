@@ -334,16 +334,49 @@ class ServiceRequestTest {
     }
 
     @Test
-    void losEstadosTerminalesNoPermitenNingunCambio() {
-        ServiceRequest contracted = published();
-        contracted.selectProvider(PROVIDER, NOW);
-        contracted.contract(NOW);
+    void unaSolicitudContratadaPuedeIniciarseYPasaAEnCurso() {
+        ServiceRequest request = published();
+        request.selectProvider(PROVIDER, NOW);
+        request.contract(NOW);
+
+        request.start(NOW.plusSeconds(60));
+
+        assertThat(request.getStatus()).isEqualTo(ServiceRequestStatus.IN_PROGRESS);
+        assertThat(request.getUpdatedAt()).isEqualTo(NOW.plusSeconds(60));
+        assertThat(request.getSelectedProviderId()).isEqualTo(PROVIDER);
+    }
+
+    @Test
+    void soloSePuedeIniciarDesdeContratada() {
+        ServiceRequest published = published();
+        ServiceRequest selected = published();
+        selected.selectProvider(PROVIDER, NOW);
+        ServiceRequest started = published();
+        started.selectProvider(PROVIDER, NOW);
+        started.contract(NOW);
+        started.start(NOW);
+
+        for (ServiceRequest request : List.of(published, selected, started)) {
+            ServiceRequestStatus before = request.getStatus();
+            assertThatThrownBy(() -> request.start(NOW.plusSeconds(1)))
+                    .isInstanceOf(InvalidStatusTransitionException.class)
+                    .hasMessageContaining("IN_PROGRESS");
+            assertThat(request.getStatus()).isEqualTo(before);
+        }
+    }
+
+    @Test
+    void losEstadosSinSiguienteEtapaNoPermitenNingunCambio() {
+        ServiceRequest inProgress = published();
+        inProgress.selectProvider(PROVIDER, NOW);
+        inProgress.contract(NOW);
+        inProgress.start(NOW);
         ServiceRequest cancelled = published();
         cancelled.cancel(NOW);
         ServiceRequest expired = published();
         expired.expire(NOW);
 
-        for (ServiceRequest terminal : List.of(contracted, cancelled, expired)) {
+        for (ServiceRequest terminal : List.of(inProgress, cancelled, expired)) {
             ServiceRequestStatus before = terminal.getStatus();
             assertThatThrownBy(() -> terminal.cancel(NOW)).isInstanceOf(InvalidStatusTransitionException.class);
             assertThatThrownBy(() -> terminal.expire(NOW)).isInstanceOf(InvalidStatusTransitionException.class);
@@ -390,6 +423,18 @@ class ServiceRequestTest {
             assertThat(location.latitude()).isEqualTo(4.7110);
             assertThat(location.longitude()).isEqualTo(-74.0721);
         });
+    }
+
+    @Test
+    void laDireccionExactaSigueDisponibleCuandoElServicioEstaEnCurso() {
+        ServiceRequest request = published();
+        request.selectProvider(PROVIDER, NOW);
+        request.contract(NOW);
+        request.start(NOW);
+
+        assertThat(request.isExactLocationVisible()).isTrue();
+        assertThat(request.getExactLocation()).hasValueSatisfying(location ->
+                assertThat(location.address()).isEqualTo("Calle 10 # 5-20, apto 301"));
     }
 
     @Test

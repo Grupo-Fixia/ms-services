@@ -225,6 +225,29 @@ class ServiceRequestRepositoryTest {
     }
 
     @Test
+    void laBaseConoceElEstadoEnCursoYExigeSuPrestador() {
+        UUID id = save(UUID.randomUUID(), List.of(), null).getId();
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE service_requests SET status = 'IN_PROGRESS' WHERE id = ?", id))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThat(jdbcTemplate.update("UPDATE service_requests SET status = 'IN_PROGRESS', "
+                + "selected_provider_id = ? WHERE id = ?", PROVIDER, id)).isEqualTo(1);
+        assertThat(repository.findById(id).orElseThrow().getStatus()).isEqualTo(ServiceRequestStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void laBaseSigueRechazandoEstadosDeEtapasQueTodaviaNoExisten() {
+        UUID id = save(UUID.randomUUID(), List.of(), null).getId();
+
+        for (String later : List.of("TECHNICIAN_FINISHED", "CLOSED")) {
+            assertThatThrownBy(() -> jdbcTemplate.update(
+                    "UPDATE service_requests SET status = ?, selected_provider_id = ? WHERE id = ?", later, PROVIDER,
+                    id)).isInstanceOf(DataIntegrityViolationException.class);
+        }
+    }
+
+    @Test
     void laBaseRechazaDosFotosEnLaMismaPosicion() {
         UUID id = save(UUID.randomUUID(), List.of("requests/a.jpg"), null).getId();
 

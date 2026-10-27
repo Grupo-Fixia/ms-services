@@ -44,7 +44,7 @@ Contrato completo en [`docs/openapi.yaml`](docs/openapi.yaml).
 | `GET /api/services/requests/{id}` | Una de mis solicitudes; 404 si no existe o es de otro cliente |
 
 El cliente sale siempre del token, nunca del cuerpo ni de la ruta. La dirección exacta se guarda pero no se
-devuelve hasta que la solicitud está `CONTRACTED`.
+devuelve hasta que la solicitud está contratada (`CONTRACTED`) o en curso (`IN_PROGRESS`).
 
 ## Oportunidades compatibles (GC-337, GC-338)
 
@@ -167,17 +167,19 @@ consulta de revocación se simula).
 | `PUBLISHED` | Publicada por el cliente; visible para prestadores compatibles |
 | `PROVIDER_SELECTED` | El cliente eligió un único prestador |
 | `CONTRACTED` | Contratación formalizada |
+| `IN_PROGRESS` | El prestador contratado inició el servicio (GC-437); la finalización y el cierre llegan con GC-441 |
 | `CANCELLED` | Cancelada (terminal) |
 | `EXPIRED` | Venció sin contratación (terminal) |
 
 ```
 PUBLISHED         -> PROVIDER_SELECTED | CANCELLED | EXPIRED
 PROVIDER_SELECTED -> CONTRACTED | CANCELLED
+CONTRACTED        -> IN_PROGRESS
 ```
 
 **Privacidad.** Los prestadores solo ven la ubicación aproximada (ciudad, zona y coordenadas redondeadas a dos
 decimales). La dirección exacta se guarda aparte y `ServiceRequest#getExactLocation()` solo la entrega cuando
-la solicitud está `CONTRACTED`.
+la solicitud está contratada o en curso (`ServiceRequestStatus#exposesExactLocation()` es el único lugar que lo decide).
 
 ### Supuestos pendientes de validar con el equipo
 
@@ -311,9 +313,29 @@ de la solicitud (`CONTRACTED`); no se duplica en la contratación.
 | `GET /api/services/requests/{id}/contract` | `ROLE_CLIENT` | La contratación de mi solicitud; 404 si no existe, es de otro cliente o aún no se contrató |
 | `GET /api/services/contracts` | `ROLE_PROFESSIONAL` | Mis contrataciones, la más reciente primero |
 | `GET /api/services/contracts/{contractId}` | `ROLE_PROFESSIONAL` | Una de mis contrataciones; 404 si es de otro prestador |
+| `POST /api/services/contracts/{contractId}/start` | `ROLE_PROFESSIONAL` | Inicio de la ejecución (GC-437); devuelve la contratación en curso |
 
 La respuesta (`Contract`) trae lo acordado y un resumen de la solicitud con `exactLocation`; no trae datos de contacto (el
 cliente y el prestador llegan como UUID de ms-users).
+
+### Inicio de la ejecución y historial (GC-437)
+
+- **Iniciar.** El prestador contratado hace `POST /api/services/contracts/{contractId}/start` (sin cuerpo): la solicitud pasa
+  de `CONTRACTED` a `IN_PROGRESS`. El prestador sale del token; una contratación ajena, inexistente o con un id que no es UUID
+  da la misma 404. Repetir el inicio sobre un servicio en curso responde 200 con el estado actual y no cambia nada ni
+  publica otro evento; dos inicios simultáneos dejan uno solo (la solicitud se toma con bloqueo). Desde otro estado, 409
+  "Transición de estado no permitida". La finalización y el cierre son de GC-441.
+- **Una sola transacción.** El cambio de estado, su fila en el historial y el evento `servicio.iniciado` del Outbox salen
+  juntos o no sale ninguno.
+- **Estado e historial.** `GET /api/services/requests/{id}/contract` (cliente), `GET /api/services/contracts/{contractId}`
+  (prestador) y el propio `start` devuelven `serviceStatus` y `timeline`, iguales para los dos participantes. Cada elemento
+  de `timeline` trae `fromStatus` (nulo en la publicación), `toStatus`, `actorId`, `actorRole` (`CLIENT`, `PROFESSIONAL` o
+  `SYSTEM`), `reason` (si hay) y `occurredAt`, del más antiguo al más reciente. El listado `GET /api/services/contracts` trae
+  `serviceStatus` pero no `timeline`.
+- **Tabla `service_request_transitions` (migración V9).** Se anota la publicación, la selección del prestador, la
+  contratación y el inicio. Las transiciones anteriores a la tabla no se reconstruyen: un servicio antiguo puede traer el
+  historial vacío o parcial. Es distinta del Outbox: este es técnico, aquel es el que ven los usuarios.
+- **Dirección exacta.** Sigue llegando al prestador contratado y al cliente mientras el servicio está en curso.
 
 ## Eventos de negocio (GC-436)
 
@@ -321,8 +343,8 @@ Contrato de los hechos que ms-services publica en Kafka: [docs/events/README.md]
 esquemas JSON en `docs/events/schemas` y un flujo completo de ejemplo en `docs/events/examples`.
 
 - Eventos completos (payload autosuficiente), uno por cambio real de estado: `solicitud.publicada`,
-  `postulacion.registrada`, `prestador.seleccionado`, `cotizacion.enviada`, `cotizacion.rechazada` y
-  `servicio.contratado`.
+  `postulacion.registrada`, `prestador.seleccionado`, `cotizacion.enviada`, `cotizacion.rechazada`,
+  `servicio.contratado` y `servicio.iniciado` (GC-437).
 - Tópico `fixia.services.service-requests`, con el id de la solicitud como clave y una secuencia por solicitud.
 - Se escriben en un Outbox en la misma transacción (GC-433) y un relay los publica (GC-434); el lakehouse los
   conserva en RustFS de forma idempotente por `eventId` (GC-435).

@@ -1,5 +1,6 @@
 package com.fixia.services.service;
 
+import com.fixia.services.domain.ActorRole;
 import com.fixia.services.domain.ApplicationStatus;
 import com.fixia.services.domain.ApproximateLocation;
 import com.fixia.services.domain.ExactLocation;
@@ -26,14 +27,16 @@ public class ServiceRequestService {
 
     private final ServiceRequestRepository repository;
     private final ServiceRequestApplicationRepository applicationRepository;
+    private final ServiceRequestHistory history;
     private final BusinessEventRecorder events;
     private final Clock clock;
 
     public ServiceRequestService(ServiceRequestRepository repository,
                                  ServiceRequestApplicationRepository applicationRepository,
-                                 BusinessEventRecorder events, Clock clock) {
+                                 ServiceRequestHistory history, BusinessEventRecorder events, Clock clock) {
         this.repository = repository;
         this.applicationRepository = applicationRepository;
+        this.history = history;
         this.events = events;
         this.clock = clock;
     }
@@ -62,6 +65,8 @@ public class ServiceRequestService {
             throw new InvalidServiceRequestException(e.getMessage(), e);
         }
         ServiceRequest saved = repository.save(serviceRequest);
+        history.record(saved.getId(), null, ServiceRequestStatus.PUBLISHED, clientId, ActorRole.CLIENT, null,
+                saved.getPublishedAt());
         events.record(BusinessEvents.requestPublished(saved), saved.getId(), BusinessEvents.Actor.client(clientId),
                 saved.getPublishedAt());
         return saved;
@@ -131,6 +136,8 @@ public class ServiceRequestService {
         chosen.select(now);
         rejected.forEach(application -> application.reject(now));
         request.selectProvider(chosen.getProviderId(), now);
+        history.record(request.getId(), ServiceRequestStatus.PUBLISHED, ServiceRequestStatus.PROVIDER_SELECTED,
+                clientId, ActorRole.CLIENT, null, now);
         // Solo hay evento cuando la selección ocurre; el reintento de arriba no publica nada (GC-433).
         events.record(BusinessEvents.providerSelected(request, chosen, rejected, now), request.getId(),
                 BusinessEvents.Actor.client(clientId), now);

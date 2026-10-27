@@ -83,6 +83,10 @@ aceptar una cotización ya aceptada con el contrato ya creado) no publica otro e
 | `cotizacion.enviada` | `QuotationService#send` (RF-031) | Técnico | Precio, alcance, condiciones, fecha acordada, vigencia y cotizaciones que reemplaza o vence |
 | `cotizacion.rechazada` | `QuotationService#reject` (RF-032, RF-033) | Cliente | Cotización y precio rechazados |
 | `servicio.contratado` | `QuotationService#accept`, al crear el contrato (RF-034, RF-035, ADR-046) | Cliente | Copia inmutable de lo contratado: precio, alcance, condiciones, fecha acordada y de contratación |
+| `servicio.iniciado` | `ContractService#start`, al pasar de `CONTRACTED` a `IN_PROGRESS` (RF-045, GC-437) | Técnico | Contrato, solicitud, cliente y prestador, momento del inicio y estado `IN_PROGRESS` |
+
+`servicio.iniciado` se escribe en la misma transacción que el cambio de estado y su anotación en el historial que ven
+los usuarios; repetir el inicio sobre un servicio ya en curso no publica otro.
 
 `servicio.contratado` implica que la cotización quedó aceptada: no hay un evento `cotizacion.aceptada` aparte,
 porque ambas cosas ocurren en la misma transacción y el contrato ya trae la cotización.
@@ -93,7 +97,7 @@ porque ambas cosas ocurren en la misma transacción y el contrato ya trae la cot
 | --- | --- | --- |
 | `solicitud.vencida`, `cotizacion.vencida` | `ms-services` (proceso programado, DEC-S4-11) | Que exista el proceso que vence solicitudes y cotizaciones |
 | `solicitud.cancelada` | `ms-services` | Que exista la cancelación en la API |
-| Inicio, finalización y cierre del servicio | `ms-services` | GC-409 y GC-411 |
+| Finalización y cierre del servicio | `ms-services` | GC-411 y GC-441 |
 | `evaluacion.registrada` | `ms-users`, con su propio Outbox y tópico | GC-444 |
 
 Un evento reservado se agrega a este contrato con su esquema antes de publicarse; mientras no tenga esquema, el
@@ -128,8 +132,8 @@ Primer hecho del flujo de ejemplo
 }
 ```
 
-El flujo completo tiene ocho hechos de la misma solicitud, en orden: publicación, dos postulaciones con precio,
-selección, cotización, rechazo, segunda cotización y contratación.
+El flujo completo tiene nueve hechos de la misma solicitud, en orden: publicación, dos postulaciones con precio,
+selección, cotización, rechazo, segunda cotización, contratación e inicio del servicio.
 
 ## 7. Privacidad
 
@@ -170,8 +174,8 @@ escribe el contenido del evento en los logs (solo `eventId`, `eventType` y la se
   su `schemaVersion`.
 - **Dos versiones de un mismo servicio.** La historia de una solicitud es la sucesión de sus eventos. En el ejemplo,
   la secuencia 1 (`solicitud.publicada`) guarda la solicitud en `PUBLISHED` y la secuencia 8 (`servicio.contratado`)
-  la guarda contratada con Ana por 105000.00 COP. Ambas quedan en el lakehouse: el estado posterior no borra ni
-  modifica el hecho anterior.
+  la guarda contratada con Ana por 105000.00 COP, y la secuencia 9 (`servicio.iniciado`) la deja en curso. Todas
+  quedan en el lakehouse: el estado posterior no borra ni modifica el hecho anterior.
 
 ## 10. Outbox en `ms-services` (para GC-433 y GC-434)
 

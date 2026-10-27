@@ -33,6 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -188,6 +189,40 @@ class BusinessEventsFlowTest {
         JsonNode contracted = envelope(events.get(7));
         assertThat(contracted.at("/data/quotationId").asText()).isEqualTo(second.toString());
         assertThat(contracted.at("/data/price/amount").asText()).isEqualTo("105000.00");
+    }
+
+    @Test
+    void iniciarElServicioDejaSuEventoYElHistorialCompletoDelFlujoReal() throws Exception {
+        UUID request = publish();
+        UUID application = idOf(apply(ANA, request, "98500.50").andExpect(status().isCreated()));
+        send("/api/services/requests/" + request + "/applications/" + application + "/selection",
+                CLIENT, "ROLE_CLIENT", null).andExpect(status().isOk());
+        UUID quotation = quote(ANA, request, "105000");
+        send("/api/services/requests/" + request + "/quotations/" + quotation + "/acceptance", CLIENT, "ROLE_CLIENT",
+                null).andExpect(status().isOk());
+        JsonNode contract = objectMapper.readTree(mockMvc.perform(
+                        get("/api/services/requests/" + request + "/contract").with(as(CLIENT, "ROLE_CLIENT")))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        String start = "/api/services/contracts/" + contract.get("id").asText() + "/start";
+
+        send(start, ANA, "ROLE_PROFESSIONAL", null).andExpect(status().isOk());
+        send(start, ANA, "ROLE_PROFESSIONAL", null).andExpect(status().isOk());
+
+        List<OutboxEvent> events = history(request);
+        assertThat(events).extracting(OutboxEvent::getEventType).containsExactly(
+                "solicitud.publicada", "postulacion.registrada", "prestador.seleccionado", "cotizacion.enviada",
+                "servicio.contratado", "servicio.iniciado");
+        assertThat(EventContract.violations(envelope(events.get(5)))).isEmpty();
+
+        JsonNode timeline = objectMapper.readTree(mockMvc.perform(
+                        get("/api/services/requests/" + request + "/contract").with(as(CLIENT, "ROLE_CLIENT")))
+                .andReturn().getResponse().getContentAsString()).get("timeline");
+        assertThat(timeline).hasSize(4);
+        assertThat(timeline.findValuesAsText("toStatus"))
+                .containsExactly("PUBLISHED", "PROVIDER_SELECTED", "CONTRACTED", "IN_PROGRESS");
+        assertThat(timeline.get(0).get("fromStatus").isNull()).isTrue();
+        assertThat(timeline.findValuesAsText("actorRole"))
+                .containsExactly("CLIENT", "CLIENT", "CLIENT", "PROFESSIONAL");
     }
 
     @Test
