@@ -237,14 +237,28 @@ class ServiceRequestRepositoryTest {
     }
 
     @Test
-    void laBaseSigueRechazandoEstadosDeEtapasQueTodaviaNoExisten() {
+    void laBaseConoceLaFinalizacionYElCierreYExigeSuPrestador() {
         UUID id = save(UUID.randomUUID(), List.of(), null).getId();
 
-        for (String later : List.of("TECHNICIAN_FINISHED", "CLOSED")) {
+        for (String stage : List.of("TECHNICIAN_FINISHED", "CLOSED")) {
+            jdbcTemplate.update("UPDATE service_requests SET status = 'PUBLISHED', selected_provider_id = NULL "
+                    + "WHERE id = ?", id);
             assertThatThrownBy(() -> jdbcTemplate.update(
-                    "UPDATE service_requests SET status = ?, selected_provider_id = ? WHERE id = ?", later, PROVIDER,
-                    id)).isInstanceOf(DataIntegrityViolationException.class);
+                    "UPDATE service_requests SET status = ? WHERE id = ?", stage, id))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+            assertThat(jdbcTemplate.update("UPDATE service_requests SET status = ?, selected_provider_id = ? "
+                    + "WHERE id = ?", stage, PROVIDER, id)).isEqualTo(1);
+            assertThat(repository.findById(id).orElseThrow().getStatus().name()).isEqualTo(stage);
         }
+    }
+
+    @Test
+    void laBaseSigueRechazandoUnEstadoInexistente() {
+        UUID id = save(UUID.randomUUID(), List.of(), null).getId();
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE service_requests SET status = 'REOPENED', selected_provider_id = ? WHERE id = ?", PROVIDER, id))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test

@@ -8,11 +8,13 @@ import java.util.EnumSet;
 import java.util.Set;
 
 import static com.fixia.services.domain.ServiceRequestStatus.CANCELLED;
+import static com.fixia.services.domain.ServiceRequestStatus.CLOSED;
 import static com.fixia.services.domain.ServiceRequestStatus.CONTRACTED;
 import static com.fixia.services.domain.ServiceRequestStatus.EXPIRED;
 import static com.fixia.services.domain.ServiceRequestStatus.IN_PROGRESS;
 import static com.fixia.services.domain.ServiceRequestStatus.PROVIDER_SELECTED;
 import static com.fixia.services.domain.ServiceRequestStatus.PUBLISHED;
+import static com.fixia.services.domain.ServiceRequestStatus.TECHNICIAN_FINISHED;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class ServiceRequestStatusTest {
@@ -32,23 +34,42 @@ class ServiceRequestStatusTest {
         assertThat(CONTRACTED.allowedTransitions()).containsExactly(IN_PROGRESS);
     }
 
+    @Test
+    void unServicioEnCursoSoloPuedeSerDeclaradoFinalizado() {
+        assertThat(IN_PROGRESS.allowedTransitions()).containsExactly(TECHNICIAN_FINISHED);
+    }
+
+    @Test
+    void unServicioFinalizadoSePuedeCerrarOObjetarYVolverAEnCurso() {
+        assertThat(TECHNICIAN_FINISHED.allowedTransitions()).containsExactlyInAnyOrder(CLOSED, IN_PROGRESS);
+    }
+
     @ParameterizedTest
-    @EnumSource(value = ServiceRequestStatus.class, names = {"IN_PROGRESS", "CANCELLED", "EXPIRED"})
-    void losEstadosSinSiguienteEtapaNoTienenTransiciones(ServiceRequestStatus terminal) {
+    @EnumSource(value = ServiceRequestStatus.class, names = {"CLOSED", "CANCELLED", "EXPIRED"})
+    void losEstadosTerminalesNoTienenTransiciones(ServiceRequestStatus terminal) {
         assertThat(terminal.isTerminal()).isTrue();
         assertThat(terminal.allowedTransitions()).isEmpty();
     }
 
     @ParameterizedTest
-    @EnumSource(value = ServiceRequestStatus.class, names = {"PUBLISHED", "PROVIDER_SELECTED", "CONTRACTED"})
+    @EnumSource(value = ServiceRequestStatus.class,
+            names = {"PUBLISHED", "PROVIDER_SELECTED", "CONTRACTED", "IN_PROGRESS", "TECHNICIAN_FINISHED"})
     void losEstadosActivosNoSonTerminales(ServiceRequestStatus active) {
         assertThat(active.isTerminal()).isFalse();
     }
 
+    @Test
+    void unServicioCerradoNoSeReabre() {
+        for (ServiceRequestStatus target : EnumSet.allOf(ServiceRequestStatus.class)) {
+            assertThat(CLOSED.canTransitionTo(target)).as("CLOSED -> %s", target).isFalse();
+        }
+    }
+
     @ParameterizedTest
     @EnumSource(ServiceRequestStatus.class)
-    void soloLaContratacionYLaEjecucionEntreganLaDireccionExacta(ServiceRequestStatus status) {
-        assertThat(status.exposesExactLocation()).isEqualTo(status == CONTRACTED || status == IN_PROGRESS);
+    void laDireccionExactaSeEntregaDesdeLaContratacionTambienUnaVezCerrado(ServiceRequestStatus status) {
+        assertThat(status.exposesExactLocation()).isEqualTo(
+                Set.of(CONTRACTED, IN_PROGRESS, TECHNICIAN_FINISHED, CLOSED).contains(status));
     }
 
     @ParameterizedTest

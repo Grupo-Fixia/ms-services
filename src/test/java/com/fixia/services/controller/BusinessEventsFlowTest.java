@@ -22,6 +22,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -223,6 +224,49 @@ class BusinessEventsFlowTest {
         assertThat(timeline.get(0).get("fromStatus").isNull()).isTrue();
         assertThat(timeline.findValuesAsText("actorRole"))
                 .containsExactly("CLIENT", "CLIENT", "CLIENT", "PROFESSIONAL");
+    }
+
+    @Test
+    void elCicloCompletoConObjecionDejaTodosLosEventosEnOrdenYValidosSinElMotivo() throws Exception {
+        String reason = "El grifo sigue goteando después del arreglo";
+        UUID request = publish();
+        UUID application = idOf(apply(ANA, request, "98500.50").andExpect(status().isCreated()));
+        send("/api/services/requests/" + request + "/applications/" + application + "/selection",
+                CLIENT, "ROLE_CLIENT", null).andExpect(status().isOk());
+        UUID quotation = quote(ANA, request, "105000");
+        send("/api/services/requests/" + request + "/quotations/" + quotation + "/acceptance", CLIENT, "ROLE_CLIENT",
+                null).andExpect(status().isOk());
+        JsonNode contract = objectMapper.readTree(mockMvc.perform(
+                        get("/api/services/requests/" + request + "/contract").with(as(CLIENT, "ROLE_CLIENT")))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        String base = "/api/services/contracts/" + contract.get("id").asText();
+
+        send(base + "/start", ANA, "ROLE_PROFESSIONAL", null).andExpect(status().isOk());
+        send(base + "/finish", ANA, "ROLE_PROFESSIONAL", null).andExpect(status().isOk());
+        send("/api/services/requests/" + request + "/closure-objection", CLIENT, "ROLE_CLIENT",
+                Map.of("reason", reason)).andExpect(status().isOk());
+        send(base + "/finish", ANA, "ROLE_PROFESSIONAL", null).andExpect(status().isOk());
+        send("/api/services/requests/" + request + "/closure", CLIENT, "ROLE_CLIENT", null)
+                .andExpect(status().isOk());
+
+        List<OutboxEvent> events = history(request);
+        assertThat(events).extracting(OutboxEvent::getEventType).containsExactly(
+                "solicitud.publicada", "postulacion.registrada", "prestador.seleccionado", "cotizacion.enviada",
+                "servicio.contratado", "servicio.iniciado", "servicio.finalizado", "servicio.cierre_objetado",
+                "servicio.finalizado", "servicio.cerrado");
+        assertThat(events).extracting(OutboxEvent::getAggregateSequence)
+                .containsExactly(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L, 10L);
+        for (OutboxEvent event : events) {
+            assertThat(EventContract.violations(envelope(event))).as(event.getEventType()).isEmpty();
+            assertThat(event.getPayload()).doesNotContain(reason);
+        }
+
+        JsonNode timeline = objectMapper.readTree(mockMvc.perform(
+                        get("/api/services/requests/" + request + "/contract").with(as(CLIENT, "ROLE_CLIENT")))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8)).get("timeline");
+        assertThat(timeline.findValuesAsText("toStatus")).containsExactly("PUBLISHED", "PROVIDER_SELECTED",
+                "CONTRACTED", "IN_PROGRESS", "TECHNICIAN_FINISHED", "IN_PROGRESS", "TECHNICIAN_FINISHED", "CLOSED");
+        assertThat(timeline.get(5).get("reason").asText()).isEqualTo(reason);
     }
 
     @Test
