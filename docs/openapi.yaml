@@ -15,8 +15,8 @@ info:
     y, en cada petición, consulta a ms-users si el token fue revocado por un cierre de sesión. Si ms-users no
     responde, la petición se rechaza con 401 (el servicio falla cerrado).
 
-    Privacidad: la dirección exacta se guarda pero no se devuelve mientras la solicitud no esté
-    `CONTRACTED`. La ubicación aproximada devuelve las coordenadas redondeadas a dos decimales (~1 km).
+    Privacidad: la dirección exacta se guarda pero no se devuelve mientras la solicitud no esté contratada
+    (`CONTRACTED`) ni en curso (`IN_PROGRESS`). La ubicación aproximada devuelve las coordenadas redondeadas a dos decimales (~1 km).
 servers:
   - url: http://localhost
     description: Traefik (docker compose)
@@ -559,6 +559,48 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/services/contracts/{contractId}/start:
+    post:
+      summary: Iniciar la ejecución del servicio contratado (GC-437)
+      description: |
+        Solo `ROLE_PROFESSIONAL`, y solo el prestador de esa contratación. Sin cuerpo: el prestador sale del token y la
+        contratación, de la ruta. La solicitud pasa de `CONTRACTED` a `IN_PROGRESS`; en la misma transacción se anota la
+        transición en el historial y se registra el evento `servicio.iniciado`, o no ocurre nada.
+
+        Repetir el inicio sobre un servicio que ya está en curso responde 200 con el estado actual y **no** cambia nada ni
+        publica otro evento (dos inicios simultáneos dejan uno solo). Si la contratación no existe, es de otro prestador o
+        el identificador no es un UUID, la respuesta es la misma 404 "Contratación no encontrada". Desde cualquier otro
+        estado que no sea `CONTRACTED` o `IN_PROGRESS`, 409. La dirección exacta sigue entregándose al prestador y al
+        cliente mientras el servicio está en curso.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: "La contratación con el servicio en curso (`serviceStatus: IN_PROGRESS`) y su historial."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: El servicio no está en un estado desde el que se pueda iniciar (título "Transición de estado no permitida").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
   /api/services/quotations:
     post:
       summary: Crear y enviar una cotización (GC-354)
@@ -733,10 +775,12 @@ components:
 
     ServiceRequestStatus:
       type: string
-      enum: [PUBLISHED, PROVIDER_SELECTED, CONTRACTED, CANCELLED, EXPIRED]
+      enum: [PUBLISHED, PROVIDER_SELECTED, CONTRACTED, IN_PROGRESS, CANCELLED, EXPIRED]
       description: |
-        `PUBLISHED` → `PROVIDER_SELECTED` | `CANCELLED` | `EXPIRED`; `PROVIDER_SELECTED` → `CONTRACTED` | `CANCELLED`.
-        `CONTRACTED`, `CANCELLED` y `EXPIRED` son terminales.
+        `PUBLISHED` → `PROVIDER_SELECTED` | `CANCELLED` | `EXPIRED`; `PROVIDER_SELECTED` → `CONTRACTED` | `CANCELLED`;
+        `CONTRACTED` → `IN_PROGRESS` (el prestador contratado inicia el servicio, GC-437).
+        `IN_PROGRESS`, `CANCELLED` y `EXPIRED` no tienen más transiciones por ahora: la finalización por el técnico y el
+        cierre por el cliente llegan con GC-441. La dirección exacta se entrega en `CONTRACTED` y `IN_PROGRESS`.
 
     CreateServiceRequest:
       type: object
@@ -756,7 +800,7 @@ components:
         exactLocation:
           type: object
           required: [address]
-          description: Opcional. Se guarda protegida y no se devuelve hasta que la solicitud esté `CONTRACTED`.
+          description: Opcional. Se guarda protegida y no se devuelve hasta que la solicitud esté contratada (`CONTRACTED` o `IN_PROGRESS`).
           properties:
             address: { type: string, maxLength: 255, example: 'Calle 10 # 5-20, apto 301' }
             latitude: { type: number, format: double, minimum: -90, maximum: 90 }
@@ -805,7 +849,7 @@ components:
             longitude: { type: number, format: double, nullable: true }
         exactLocation:
           type: object
-          description: Solo presente cuando la solicitud está `CONTRACTED` y el cliente indicó una dirección.
+          description: Solo presente cuando la solicitud está contratada (`CONTRACTED` o `IN_PROGRESS`) y el cliente indicó una dirección.
           properties:
             address: { type: string }
             latitude: { type: number, format: double, nullable: true }
@@ -998,6 +1042,19 @@ components:
         conditions: { type: string }
         agreedAt: { type: string, format: date-time, description: Fecha acordada para el servicio. }
         contractedAt: { type: string, format: date-time }
+        serviceStatus:
+          allOf:
+            - $ref: '#/components/schemas/ServiceRequestStatus'
+          description: Estado actual del servicio (GC-437); es el mismo `serviceRequest.status`. Lo ven igual el cliente y el prestador.
+        timeline:
+          type: array
+          description: |
+            Historial de transiciones del servicio, del más antiguo al más reciente (GC-437). Se devuelve al consultar una
+            contratación (`GET /requests/{id}/contract`, `GET /contracts/{id}` y `POST /contracts/{id}/start`), no en el
+            listado `GET /contracts`. Las transiciones anteriores a la tabla de historial no se reconstruyen: un servicio
+            antiguo puede traerlo vacío o parcial.
+          items:
+            $ref: '#/components/schemas/Transition'
         serviceRequest:
           type: object
           properties:
@@ -1013,12 +1070,27 @@ components:
                 longitude: { type: number, format: double, nullable: true }
             exactLocation:
               type: object
-              description: Presente porque la solicitud ya está `CONTRACTED`, si el cliente indicó una dirección.
+              description: Presente porque la solicitud ya está contratada (`CONTRACTED` o `IN_PROGRESS`), si el cliente indicó una dirección.
               properties:
                 address: { type: string }
                 latitude: { type: number, format: double, nullable: true }
                 longitude: { type: number, format: double, nullable: true }
             expectedAt: { type: string, format: date-time }
+
+    Transition:
+      type: object
+      description: Un cambio de estado del servicio (GC-437).
+      properties:
+        fromStatus:
+          allOf:
+            - $ref: '#/components/schemas/ServiceRequestStatus'
+          nullable: true
+          description: Estado anterior; `null` en la publicación, que no tiene origen.
+        toStatus: { $ref: '#/components/schemas/ServiceRequestStatus' }
+        actorId: { type: string, format: uuid, description: "`users.id` de quien hizo el cambio; ausente si lo hizo el sistema." }
+        actorRole: { type: string, enum: [CLIENT, PROFESSIONAL, SYSTEM] }
+        reason: { type: string, maxLength: 500, description: Motivo, cuando la transición lo requiere; ausente si no hay. }
+        occurredAt: { type: string, format: date-time }
 
     NotEligibleProblem:
       allOf:

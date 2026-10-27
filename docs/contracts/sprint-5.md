@@ -41,7 +41,8 @@ tareas del Sprint 5 en Jira.
 | Presupuesto orientativo en `service_requests` | ms-services | ✅ V8 | GC-421 |
 | Tipo de prestador y técnico propuesto en `applications` | ms-services | 🟡 | GC-468 |
 | Revisión visible de la cotización | ms-services | 🟡 | GC-427 |
-| Estados de ejecución y tabla de transiciones | ms-services | 🟡 | GC-437, GC-441 |
+| Estado `IN_PROGRESS`, inicio y tabla de transiciones | ms-services | ✅ V9 | GC-437 |
+| Finalización, cierre y objeción (`TECHNICIAN_FINISHED`, `CLOSED`) | ms-services | 🟡 | GC-441 |
 | Evidencias (metadatos en base, archivo en RustFS) | ms-services | 🟡 | GC-439 |
 | Identidad de empresa y asociación empresa–técnico | ms-users | 🟡 | GC-466 |
 | Evaluaciones bidireccionales y su Outbox | ms-users | 🟡 | GC-443, GC-444 |
@@ -96,7 +97,7 @@ Ver la sección 8 para la empresa. Para el técnico independiente ya está imple
 - `POST /api/services/requests/{id}/applications/{applicationId}/selection`: elige uno; las demás pasan a `REJECTED`.
   Seleccionar **no** crea cotización ni contrato (RF-028).
 
-## 5. Ciclo del servicio (🟡 GC-437, GC-441)
+## 5. Ciclo del servicio (✅ inicio GC-437 / 🟡 finalización y cierre GC-441)
 
 ### 5.1 Máquina de estados de `service_requests.status`
 
@@ -118,7 +119,7 @@ PUBLISHED ──selección──▶ PROVIDER_SELECTED ──aceptar cotización�
 
 | Transición | Actor | Ruta (🟡) | Evento (🟡) | Reglas |
 | --- | --- | --- | --- | --- |
-| CONTRACTED → IN_PROGRESS | Técnico contratado | `POST /api/services/contracts/{contractId}/start` | `servicio.iniciado` | Solo el `provider_id` del contrato. Repetir sobre `IN_PROGRESS` responde 200 sin cambio |
+| CONTRACTED → IN_PROGRESS ✅ | Técnico contratado | `POST /api/services/contracts/{contractId}/start` | `servicio.iniciado` ✅ | Solo el `provider_id` del contrato. Repetir sobre `IN_PROGRESS` responde 200 sin cambio ni evento; desde otro estado, 409 |
 | IN_PROGRESS → TECHNICIAN_FINISHED | Técnico contratado | `POST /api/services/contracts/{contractId}/finish` | `servicio.finalizado` | No cierra el servicio (RF-047). Evidencias opcionales |
 | TECHNICIAN_FINISHED → CLOSED | Cliente dueño | `POST /api/services/requests/{id}/closure` | `servicio.cerrado` | Registra quién y cuándo (RF-048). Un servicio `CLOSED` no se reabre: peticiones tardías dan 409 |
 | TECHNICIAN_FINISHED → IN_PROGRESS | Cliente dueño | `POST /api/services/requests/{id}/closure-objection` con `{reason}` | `servicio.cierre_objetado` | ❓ Ver abajo |
@@ -132,7 +133,7 @@ PUBLISHED ──selección──▶ PROVIDER_SELECTED ──aceptar cotización�
   `IN_PROGRESS` con el motivo registrado; las disputas formales (RF-049, RF-050) siguen fuera del sprint. Deciden
   GC-441 (Tomás R.) y el PO (Andrés).
 
-### 5.2 Historial de transiciones (🟡 GC-437)
+### 5.2 Historial de transiciones (✅ GC-437, migración V9)
 
 Tabla `service_request_transitions` en ms-services:
 
@@ -140,21 +141,26 @@ Tabla `service_request_transitions` en ms-services:
 | --- | --- | --- |
 | `id` | UUID PK | |
 | `service_request_id` | UUID FK → `service_requests` | |
-| `from_status`, `to_status` | VARCHAR(30) | Estados de la sección 5.1 |
+| `from_status`, `to_status` | VARCHAR(30) | Estados de la sección 5.1. `from_status` es nulo en la publicación (no tiene origen). Sin CHECK sobre los valores: los guarda el enum del dominio |
 | `actor_id` | UUID | `users.id`; nulo si fue el sistema |
 | `actor_role` | VARCHAR(20) | `CLIENT`, `PROFESSIONAL` o `SYSTEM` |
 | `reason` | VARCHAR(500) | Solo en la objeción |
 | `occurred_at` | TIMESTAMP WITH TIME ZONE | |
 
-Se registran también las transiciones ya existentes (publicación, selección, contratación) desde que exista la tabla;
-las anteriores a ella no se reconstruyen. El Outbox no reemplaza este historial: el Outbox es técnico y este es el que
-ven los usuarios.
+Se registran también las transiciones ya existentes (publicación, selección, contratación) desde que existe la tabla;
+las anteriores a ella no se reconstruyen (✅ implementado: un servicio antiguo trae `timeline` vacío o parcial). El
+Outbox no reemplaza este historial: el Outbox es técnico y este es el que ven los usuarios. La anotación se hace con el
+mismo instante y en la misma transacción que el cambio de estado y el evento.
 
-### 5.3 Consulta del estado (🟡)
+### 5.3 Consulta del estado (✅ GC-437)
 
-- Técnico: `GET /api/services/contracts/{contractId}` agrega `serviceStatus` y `timeline` (lista de transiciones).
-- Cliente: `GET /api/services/requests/{id}/contract` agrega lo mismo.
-- `serviceRequest.exactLocation` sigue llegando solo al prestador contratado (ADR-009).
+- Técnico: `GET /api/services/contracts/{contractId}` agrega `serviceStatus` y `timeline` (lista de transiciones, del más
+  antiguo al más reciente, con `fromStatus`, `toStatus`, `actorId`, `actorRole`, `reason` y `occurredAt`).
+- Cliente: `GET /api/services/requests/{id}/contract` agrega lo mismo, igual que el técnico.
+- `POST /contracts/{contractId}/start` devuelve la misma respuesta. El listado `GET /contracts` trae `serviceStatus` pero no
+  `timeline`.
+- `serviceRequest.exactLocation` sigue llegando solo al prestador contratado (ADR-009) y al cliente dueño, también con el
+  servicio en curso (`ServiceRequestStatus#exposesExactLocation()`; GC-441 agrega ahí las etapas siguientes).
 
 ## 6. Evidencias (🟡 GC-439, GC-440; almacenamiento GC-456)
 
@@ -258,7 +264,7 @@ y el cliente la puede seleccionar. **Cotización, contratación, ejecución y ev
 
 | Evento | Productor | Datos principales |
 | --- | --- | --- |
-| `servicio.iniciado` | ms-services (GC-437) | `contractId`, `serviceRequestId`, `providerId`, `startedAt` |
+| `servicio.iniciado` ✅ | ms-services (GC-437) | `contractId`, `serviceRequestId`, `clientId`, `providerId`, `startedAt`, `status` (`IN_PROGRESS`); esquema y ejemplo en `docs/events` |
 | `servicio.finalizado` | ms-services (GC-441) | `contractId`, `serviceRequestId`, `providerId`, `finishedAt`, `evidenceCount` |
 | `servicio.cierre_objetado` | ms-services (GC-441) | `contractId`, `serviceRequestId`, `clientId`, `objectedAt` (sin el texto del motivo) |
 | `servicio.cerrado` | ms-services (GC-441) | `contractId`, `serviceRequestId`, `clientId`, `providerId`, `closedAt` |
@@ -272,9 +278,9 @@ Todos usan el sobre, el tópico y las reglas de idempotencia de GC-436. Los de m
 
 | Repositorio | Siguiente | Para |
 | --- | --- | --- |
-| ms-services | V8 | Presupuesto (GC-421) |
-| ms-services | luego | Tipo de prestador (GC-468), transiciones y estados (GC-437/441), evidencias (GC-439) |
-| ms-users | V8 en adelante | Empresa (GC-466), evaluaciones y su Outbox (GC-444) |
+| ms-services | V10 | V8 es el presupuesto (GC-421) y V9 el inicio y el historial (GC-437), ya tomadas |
+| ms-services | luego | Tipo de prestador (GC-468), finalización y cierre (GC-441, amplía `ck_service_requests_status`), evidencias (GC-439), revisión de la cotización (GC-427) |
+| ms-users | V9 en adelante | V8 es la empresa (GC-466), ya tomada; evaluaciones y su Outbox (GC-444) |
 
 **Regla:** el número lo toma quien **fusiona primero**. Antes de fusionar un PR con migración, se actualiza la rama
 con `develop` y se renumera si hace falta. Si una migración llega con un número menor que otra ya aplicada en QA,
