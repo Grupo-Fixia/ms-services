@@ -42,7 +42,7 @@ tareas del Sprint 5 en Jira.
 | Tipo de prestador y técnico propuesto en `applications` | ms-services | 🟡 | GC-468 |
 | Revisión visible de la cotización | ms-services | 🟡 | GC-427 |
 | Estado `IN_PROGRESS`, inicio y tabla de transiciones | ms-services | ✅ V9 | GC-437 |
-| Finalización, cierre y objeción (`TECHNICIAN_FINISHED`, `CLOSED`) | ms-services | 🟡 | GC-441 |
+| Finalización, cierre y objeción (`TECHNICIAN_FINISHED`, `CLOSED`) | ms-services | ✅ V10 | GC-441 |
 | Evidencias (metadatos en base, archivo en RustFS) | ms-services | 🟡 | GC-439 |
 | Identidad de empresa y asociación empresa–técnico | ms-users | 🟡 | GC-466 |
 | Evaluaciones bidireccionales y su Outbox | ms-users | 🟡 | GC-443, GC-444 |
@@ -97,7 +97,7 @@ Ver la sección 8 para la empresa. Para el técnico independiente ya está imple
 - `POST /api/services/requests/{id}/applications/{applicationId}/selection`: elige uno; las demás pasan a `REJECTED`.
   Seleccionar **no** crea cotización ni contrato (RF-028).
 
-## 5. Ciclo del servicio (✅ inicio GC-437 / 🟡 finalización y cierre GC-441)
+## 5. Ciclo del servicio (✅ inicio GC-437 / ✅ finalización y cierre GC-441)
 
 ### 5.1 Máquina de estados de `service_requests.status`
 
@@ -120,18 +120,21 @@ PUBLISHED ──selección──▶ PROVIDER_SELECTED ──aceptar cotización�
 | Transición | Actor | Ruta (🟡) | Evento (🟡) | Reglas |
 | --- | --- | --- | --- | --- |
 | CONTRACTED → IN_PROGRESS ✅ | Técnico contratado | `POST /api/services/contracts/{contractId}/start` | `servicio.iniciado` ✅ | Solo el `provider_id` del contrato. Repetir sobre `IN_PROGRESS` responde 200 sin cambio ni evento; desde otro estado, 409 |
-| IN_PROGRESS → TECHNICIAN_FINISHED | Técnico contratado | `POST /api/services/contracts/{contractId}/finish` | `servicio.finalizado` | No cierra el servicio (RF-047). Evidencias opcionales |
-| TECHNICIAN_FINISHED → CLOSED | Cliente dueño | `POST /api/services/requests/{id}/closure` | `servicio.cerrado` | Registra quién y cuándo (RF-048). Un servicio `CLOSED` no se reabre: peticiones tardías dan 409 |
-| TECHNICIAN_FINISHED → IN_PROGRESS | Cliente dueño | `POST /api/services/requests/{id}/closure-objection` con `{reason}` | `servicio.cierre_objetado` | ❓ Ver abajo |
+| IN_PROGRESS → TECHNICIAN_FINISHED ✅ | Técnico contratado | `POST /api/services/contracts/{contractId}/finish` | `servicio.finalizado` ✅ | No cierra el servicio (RF-047). Evidencias opcionales (no se piden). Repetir sobre `TECHNICIAN_FINISHED` responde 200 sin cambio ni evento; desde otro estado, 409 |
+| TECHNICIAN_FINISHED → CLOSED ✅ | Cliente dueño | `POST /api/services/requests/{id}/closure` | `servicio.cerrado` ✅ | Registra quién y cuándo (RF-048). Confirmar un servicio ya `CLOSED` responde 200 sin duplicar; un servicio `CLOSED` no se reabre: objetar, finalizar o iniciar dan 409. Desde otro estado, 409 |
+| TECHNICIAN_FINISHED → IN_PROGRESS ✅ | Cliente dueño | `POST /api/services/requests/{id}/closure-objection` con `{reason}` | `servicio.cierre_objetado` ✅ | `reason` obligatorio, máximo 500. Repetir la misma objeción sobre el servicio ya devuelto a `IN_PROGRESS` responde 200 sin duplicar; otro motivo, o desde otro estado, 409 |
 
 - Las rutas reutilizan los prefijos que cada rol ya tiene: el técnico trabaja sobre su contrato (`/contracts`, como en
   GC-359) y el cliente sobre su solicitud (`/requests`). No hace falta tocar la seguridad por rol.
 - Todas toman la solicitud con bloqueo pesimista (ADR-043), validan el estado de origen y escriben transición y evento en
   la misma transacción.
 - Sin cierre automático por silencio (GC-441).
-- ❓ **Objeción del cliente:** GC-441 pide manejar la inconformidad sin convertirla en cierre. Se propone que vuelva a
-  `IN_PROGRESS` con el motivo registrado; las disputas formales (RF-049, RF-050) siguen fuera del sprint. Deciden
-  GC-441 (Tomás R.) y el PO (Andrés).
+- ✅ **Objeción del cliente** (decidido por GC-441, Tomás R., y confirmado por el PO, Andrés): la inconformidad no se
+  convierte en cierre. El servicio vuelve a `IN_PROGRESS` con el motivo registrado en el historial, que ven el cliente y el
+  técnico; el evento `servicio.cierre_objetado` no lleva el texto. Las disputas formales (RF-049, RF-050) siguen fuera del
+  sprint. Después de una objeción el técnico puede declarar finalizado otra vez y el cliente cerrar.
+- Las tres rutas devuelven la misma respuesta que `GET /requests/{id}/contract` (contratación con `serviceStatus` y
+  `timeline`), igual que `start`.
 
 ### 5.2 Historial de transiciones (✅ GC-437, migración V9)
 
@@ -265,9 +268,9 @@ y el cliente la puede seleccionar. **Cotización, contratación, ejecución y ev
 | Evento | Productor | Datos principales |
 | --- | --- | --- |
 | `servicio.iniciado` ✅ | ms-services (GC-437) | `contractId`, `serviceRequestId`, `clientId`, `providerId`, `startedAt`, `status` (`IN_PROGRESS`); esquema y ejemplo en `docs/events` |
-| `servicio.finalizado` | ms-services (GC-441) | `contractId`, `serviceRequestId`, `providerId`, `finishedAt`, `evidenceCount` |
-| `servicio.cierre_objetado` | ms-services (GC-441) | `contractId`, `serviceRequestId`, `clientId`, `objectedAt` (sin el texto del motivo) |
-| `servicio.cerrado` | ms-services (GC-441) | `contractId`, `serviceRequestId`, `clientId`, `providerId`, `closedAt` |
+| `servicio.finalizado` ✅ | ms-services (GC-441) | `contractId`, `serviceRequestId`, `clientId`, `providerId`, `finishedAt`, `status` (`TECHNICIAN_FINISHED`). Sin `evidenceCount` por ahora: GC-439 lo agrega como campo opcional sin cambiar de versión |
+| `servicio.cierre_objetado` ✅ | ms-services (GC-441) | `contractId`, `serviceRequestId`, `clientId`, `providerId`, `objectedAt`, `status` (`IN_PROGRESS`); sin el texto del motivo |
+| `servicio.cerrado` ✅ | ms-services (GC-441) | `contractId`, `serviceRequestId`, `clientId`, `providerId`, `closedAt`, `status` (`CLOSED`) |
 | `evidencia.registrada` | ms-services (GC-439) | `evidenceId`, `serviceRequestId`, `uploadedBy`, `contentType`, `sizeBytes`, `sha256` (sin el archivo ni la clave del objeto) |
 | `evaluacion.registrada` | ms-users (GC-444) | `evaluationId`, `serviceRequestId`, `direction`, `evaluatorId`, `evaluatedId`, `rating` (sin el comentario) |
 
@@ -278,8 +281,8 @@ Todos usan el sobre, el tópico y las reglas de idempotencia de GC-436. Los de m
 
 | Repositorio | Siguiente | Para |
 | --- | --- | --- |
-| ms-services | V10 | V8 es el presupuesto (GC-421) y V9 el inicio y el historial (GC-437), ya tomadas |
-| ms-services | luego | Tipo de prestador (GC-468), finalización y cierre (GC-441, amplía `ck_service_requests_status`), evidencias (GC-439), revisión de la cotización (GC-427) |
+| ms-services | V11 | V8 es el presupuesto (GC-421), V9 el inicio y el historial (GC-437) y V10 la finalización y el cierre (GC-441), ya tomadas |
+| ms-services | luego | Tipo de prestador (GC-468), evidencias (GC-439), revisión de la cotización (GC-427) |
 | ms-users | V9 en adelante | V8 es la empresa (GC-466), ya tomada; evaluaciones y su Outbox (GC-444) |
 
 **Regla:** el número lo toma quien **fusiona primero**. Antes de fusionar un PR con migración, se actualiza la rama
@@ -293,7 +296,7 @@ Flyway no arranca.
 | ~~Presupuesto: valor o rango~~ | **Decidido:** valor único obligatorio en COP (GC-421, GC-422) | — |
 | Número de versión visible de la cotización | Sí, `revision` | GC-427 (Tomás R.) |
 | Contraoferta del cliente | Fuera del sprint | GC-427 con el PO |
-| Objeción al cierre | Vuelve a `IN_PROGRESS` con motivo | GC-441 (Tomás R.) y el PO (Andrés) |
+| ~~Objeción al cierre~~ | **Decidido:** vuelve a `IN_PROGRESS` con motivo (GC-441, confirmado por el PO) | — |
 | Límites de evidencias | JPEG, PNG, WebP, PDF; 10 MB; 10 por servicio | GC-439, GC-440, GC-456 |
 | Corregir evaluaciones | No en el sprint | GC-443 (Juan Pablo) |
 | Técnico en varias empresas o también independiente | Una empresa; puede seguir como independiente | PO con GC-466 |

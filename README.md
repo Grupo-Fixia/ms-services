@@ -167,19 +167,24 @@ consulta de revocación se simula).
 | `PUBLISHED` | Publicada por el cliente; visible para prestadores compatibles |
 | `PROVIDER_SELECTED` | El cliente eligió un único prestador |
 | `CONTRACTED` | Contratación formalizada |
-| `IN_PROGRESS` | El prestador contratado inició el servicio (GC-437); la finalización y el cierre llegan con GC-441 |
+| `IN_PROGRESS` | El prestador contratado inició el servicio (GC-437) |
+| `TECHNICIAN_FINISHED` | El técnico declaró que terminó (GC-441); falta que el cliente confirme o objete |
+| `CLOSED` | El cliente confirmó el cierre (GC-441); definitivo, habilita la evaluación (terminal) |
 | `CANCELLED` | Cancelada (terminal) |
 | `EXPIRED` | Venció sin contratación (terminal) |
 
 ```
-PUBLISHED         -> PROVIDER_SELECTED | CANCELLED | EXPIRED
-PROVIDER_SELECTED -> CONTRACTED | CANCELLED
-CONTRACTED        -> IN_PROGRESS
+PUBLISHED           -> PROVIDER_SELECTED | CANCELLED | EXPIRED
+PROVIDER_SELECTED   -> CONTRACTED | CANCELLED
+CONTRACTED          -> IN_PROGRESS
+IN_PROGRESS         -> TECHNICIAN_FINISHED
+TECHNICIAN_FINISHED -> CLOSED | IN_PROGRESS   (el cliente confirma el cierre o lo objeta)
 ```
 
 **Privacidad.** Los prestadores solo ven la ubicación aproximada (ciudad, zona y coordenadas redondeadas a dos
 decimales). La dirección exacta se guarda aparte y `ServiceRequest#getExactLocation()` solo la entrega cuando
-la solicitud está contratada o en curso (`ServiceRequestStatus#exposesExactLocation()` es el único lugar que lo decide).
+la solicitud está contratada, en curso, finalizada o cerrada (`ServiceRequestStatus#exposesExactLocation()` es el único
+lugar que lo decide).
 
 ### Supuestos pendientes de validar con el equipo
 
@@ -314,6 +319,9 @@ de la solicitud (`CONTRACTED`); no se duplica en la contratación.
 | `GET /api/services/contracts` | `ROLE_PROFESSIONAL` | Mis contrataciones, la más reciente primero |
 | `GET /api/services/contracts/{contractId}` | `ROLE_PROFESSIONAL` | Una de mis contrataciones; 404 si es de otro prestador |
 | `POST /api/services/contracts/{contractId}/start` | `ROLE_PROFESSIONAL` | Inicio de la ejecución (GC-437); devuelve la contratación en curso |
+| `POST /api/services/contracts/{contractId}/finish` | `ROLE_PROFESSIONAL` | El técnico declara que terminó (GC-441); no cierra el servicio |
+| `POST /api/services/requests/{id}/closure` | `ROLE_CLIENT` | El cliente confirma el cierre (GC-441); definitivo |
+| `POST /api/services/requests/{id}/closure-objection` | `ROLE_CLIENT` | El cliente objeta el cierre con `{ "reason": "..." }` (GC-441); el servicio vuelve a `IN_PROGRESS` |
 
 La respuesta (`Contract`) trae lo acordado y un resumen de la solicitud con `exactLocation`; no trae datos de contacto (el
 cliente y el prestador llegan como UUID de ms-users).
@@ -324,7 +332,7 @@ cliente y el prestador llegan como UUID de ms-users).
   de `CONTRACTED` a `IN_PROGRESS`. El prestador sale del token; una contratación ajena, inexistente o con un id que no es UUID
   da la misma 404. Repetir el inicio sobre un servicio en curso responde 200 con el estado actual y no cambia nada ni
   publica otro evento; dos inicios simultáneos dejan uno solo (la solicitud se toma con bloqueo). Desde otro estado, 409
-  "Transición de estado no permitida". La finalización y el cierre son de GC-441.
+  "Transición de estado no permitida". La finalización y el cierre están más abajo (GC-441).
 - **Una sola transacción.** El cambio de estado, su fila en el historial y el evento `servicio.iniciado` del Outbox salen
   juntos o no sale ninguno.
 - **Estado e historial.** `GET /api/services/requests/{id}/contract` (cliente), `GET /api/services/contracts/{contractId}`
@@ -337,6 +345,28 @@ cliente y el prestador llegan como UUID de ms-users).
   historial vacío o parcial. Es distinta del Outbox: este es técnico, aquel es el que ven los usuarios.
 - **Dirección exacta.** Sigue llegando al prestador contratado y al cliente mientras el servicio está en curso.
 
+### Finalización y cierre (GC-441)
+
+El técnico y el cliente toman decisiones distintas y auditables; no hay cierre automático por silencio.
+
+- **Finalizar (técnico).** `POST /api/services/contracts/{contractId}/finish`, sin cuerpo: `IN_PROGRESS -> TECHNICIAN_FINISHED`.
+  No cierra el servicio ni exige evidencias (son opcionales y llegan con GC-439). Repetirlo responde 200 sin duplicar; sin haber
+  iniciado, o ya cerrado, 409.
+- **Confirmar el cierre (cliente).** `POST /api/services/requests/{id}/closure`, sin cuerpo: `TECHNICIAN_FINISHED -> CLOSED`,
+  definitivo. Confirmar un servicio ya cerrado responde 200 sin duplicar (cierre doble); si el técnico aún no lo declaró
+  finalizado, 409.
+- **Objetar el cierre (cliente).** `POST /api/services/requests/{id}/closure-objection` con `{ "reason": "..." }` (obligatorio,
+  máximo 500 caracteres): `TECHNICIAN_FINISHED -> IN_PROGRESS`. No es un cierre satisfactorio ni una disputa formal; el motivo
+  queda en el historial, que ven el cliente y el técnico, y **no** viaja en el evento. Repetir la misma objeción responde 200
+  sin duplicar; otro motivo, o desde otro estado, 409. Después el técnico puede finalizar otra vez y el cliente cerrar.
+- **Un servicio cerrado no se reabre.** Objetar, finalizar o iniciar un servicio `CLOSED` da 409 y no cambia nada.
+- **Mismos permisos que el resto:** el actor sale del token; un técnico o cliente ajeno recibe la misma 404 que si no existiera;
+  el rol equivocado, 403; sin token, 401. Cada operación es una sola transacción (estado + historial + evento del Outbox) con la
+  solicitud bloqueada, así que dos simultáneas dejan una sola.
+- **Respuesta.** Las tres devuelven la misma `Contract` que `GET /requests/{id}/contract`, con `serviceStatus` y `timeline`.
+- **Migración V10:** amplía las restricciones de estado de `service_requests`; no hay columnas nuevas (quién, cuándo y el motivo
+  los guarda `service_request_transitions`). La dirección exacta se sigue entregando hasta `CLOSED` y después.
+
 ## Eventos de negocio (GC-436)
 
 Contrato de los hechos que ms-services publica en Kafka: [docs/events/README.md](docs/events/README.md), con los
@@ -344,7 +374,8 @@ esquemas JSON en `docs/events/schemas` y un flujo completo de ejemplo en `docs/e
 
 - Eventos completos (payload autosuficiente), uno por cambio real de estado: `solicitud.publicada`,
   `postulacion.registrada`, `prestador.seleccionado`, `cotizacion.enviada`, `cotizacion.rechazada`,
-  `servicio.contratado` y `servicio.iniciado` (GC-437).
+  `servicio.contratado`, `servicio.iniciado` (GC-437), `servicio.finalizado`, `servicio.cierre_objetado` y
+  `servicio.cerrado` (GC-441).
 - Tópico `fixia.services.service-requests`, con el id de la solicitud como clave y una secuencia por solicitud.
 - Se escriben en un Outbox en la misma transacción (GC-433) y un relay los publica (GC-434); el lakehouse los
   conserva en RustFS de forma idempotente por `eventId` (GC-435).
