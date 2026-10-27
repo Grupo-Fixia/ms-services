@@ -38,7 +38,7 @@ tareas del Sprint 5 en Jira.
 | Precio propuesto en `applications` (`proposed_amount`, `currency`) | ms-services | ✅ V6 | GC-423 |
 | Perfil público del técnico (ruta interna) y `provider` en postulantes | ms-users / ms-services | ✅ | GC-425 |
 | Outbox `outbox_events` y 6 eventos | ms-services | ✅ V7 | GC-433, GC-436 |
-| Presupuesto orientativo en `service_requests` | ms-services | 🟡 V8 | GC-421 |
+| Presupuesto orientativo en `service_requests` | ms-services | ✅ V8 | GC-421 |
 | Tipo de prestador y técnico propuesto en `applications` | ms-services | 🟡 | GC-468 |
 | Revisión visible de la cotización | ms-services | 🟡 | GC-427 |
 | Estados de ejecución y tabla de transiciones | ms-services | 🟡 | GC-437, GC-441 |
@@ -54,12 +54,12 @@ Son cuatro datos distintos, en lugares distintos, y ninguno reemplaza a otro:
 
 | Concepto | Dónde vive | Quién lo fija | Estado |
 | --- | --- | --- | --- |
-| **Presupuesto orientativo** | `service_requests.budget_amount` + `budget_currency` | Cliente al publicar | 🟡 GC-421 |
+| **Presupuesto orientativo** | `service_requests.budget_amount` + `budget_currency` | Cliente al publicar | ✅ GC-421 |
 | **Precio propuesto** | `applications.proposed_amount` + `currency` | Prestador al postularse | ✅ GC-423 |
 | **Valor de la cotización** | `quotations.amount` + `currency` (una fila por versión) | Prestador seleccionado | ✅ GC-354 |
 | **Precio contratado** | `service_contracts.amount` + `currency` (copia de la cotización aceptada) | Nace al aceptar | ✅ GC-359 |
 
-### 3.1 Presupuesto orientativo (🟡 GC-421 / GC-422)
+### 3.1 Presupuesto orientativo (✅ GC-421 backend / 🟡 GC-422 Flutter)
 
 - `POST /api/services/requests` agrega `"budgetAmount": 200000` y `"budgetCurrency": "COP"`. **Obligatorios en
   solicitudes nuevas** (RF-020 dice "indicando un presupuesto"), con las mismas reglas de importe que el precio.
@@ -69,8 +69,11 @@ Son cuatro datos distintos, en lugares distintos, y ninguno reemplaza a otro:
   `COP` (mismo patrón que `ck_applications_proposed_price`, con los `IS NOT NULL`).
 - Evento: `solicitud.publicada` gana `budget` (`{amount, currency}` como el resto del dinero en eventos) como campo
   **opcional**; sigue siendo versión 1.
-- ❓ **Valor único o rango** (SRS §11.4 lo deja al desarrollo): se propone **valor único**, como el precio propuesto
-  que ya implementó Andrés en Flutter. Deciden GC-421 (Tomás R.) y GC-422 (Andrés) antes de migrar.
+- ✅ **Valor único, no rango** (SRS §11.4 lo deja al desarrollo): decidido por GC-421 (Tomás R.) y GC-422 (Andrés),
+  igual que el precio propuesto que ya implementó Andrés en Flutter. Es obligatorio, mayor que cero, en COP y solo
+  orientativo: no es un pago, un límite ni el precio de la postulación, la cotización o el contrato.
+- Implementado: la respuesta devuelve el importe con dos decimales (`200000.00`); la entrada acepta `200000` o
+  `200000.5`. Una moneda distinta de `COP` o un cuerpo sin importe o sin moneda es 400. Ver el ejemplo en el README.
 
 ### 3.2 Cotización versionada (✅ base / 🟡 ajuste GC-427)
 
@@ -281,7 +284,7 @@ Flyway no arranca.
 
 | Tema | Propuesta | Quién decide |
 | --- | --- | --- |
-| Presupuesto: valor o rango | Valor único obligatorio | GC-421 (Tomás R.) y GC-422 (Andrés) |
+| ~~Presupuesto: valor o rango~~ | **Decidido:** valor único obligatorio en COP (GC-421, GC-422) | — |
 | Número de versión visible de la cotización | Sí, `revision` | GC-427 (Tomás R.) |
 | Contraoferta del cliente | Fuera del sprint | GC-427 con el PO |
 | Objeción al cierre | Vuelve a `IN_PROGRESS` con motivo | GC-441 (Tomás R.) y el PO (Andrés) |
