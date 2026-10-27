@@ -54,7 +54,8 @@ public class ServiceRequestService {
         ServiceRequest serviceRequest;
         try {
             serviceRequest = ServiceRequest.publish(clientId, request.category(), request.description(),
-                    approximate, exact, request.expectedAt(), request.photoKeys(), clock.instant());
+                    approximate, exact, request.expectedAt(), request.budgetAmount(), request.budgetCurrency(),
+                    request.photoKeys(), clock.instant());
         } catch (IllegalArgumentException e) {
             // Reglas del dominio que la validación del cuerpo no cubre (por ejemplo, el momento esperado frente
             // al reloj del servicio). El mensaje es propio y no incluye datos del cliente.

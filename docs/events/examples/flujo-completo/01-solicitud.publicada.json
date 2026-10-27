@@ -28,6 +28,10 @@
     "expectedAt": "2026-10-28T15:00:00Z",
     "publishedAt": "2026-10-26T14:00:00Z",
     "status": "PUBLISHED",
-    "photoCount": 2
+    "photoCount": 2,
+    "budget": {
+      "amount": "200000.00",
+      "currency": "COP"
+    }
   }
 }

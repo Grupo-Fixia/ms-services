@@ -71,7 +71,7 @@ public final class BusinessEvents {
 
     record RequestPublished(UUID serviceRequestId, UUID clientId, ServiceCategory category, String description,
                             Location approximateLocation, Instant expectedAt, Instant publishedAt,
-                            ServiceRequestStatus status, int photoCount) {
+                            ServiceRequestStatus status, int photoCount, Money budget) {
     }
 
     record ApplicationRegistered(UUID applicationId, UUID serviceRequestId, UUID providerId, ApplicationStatus status,
@@ -100,14 +100,14 @@ public final class BusinessEvents {
                              ServiceRequestStatus status) {
     }
 
-    /** El cliente publicó la solicitud. Solo ubicación aproximada y el número de fotos. */
+    /** El cliente publicó la solicitud. Solo ubicación aproximada, el número de fotos y su presupuesto orientativo. */
     public static Event requestPublished(ServiceRequest request) {
         ApproximateLocation location = request.getApproximateLocation();
         return new Event(REQUEST_PUBLISHED, V1, new RequestPublished(request.getId(), request.getClientId(),
                 request.getCategory(), request.getDescription(),
                 new Location(location.city(), location.zone(), location.latitude(), location.longitude()),
                 request.getExpectedAt(), request.getPublishedAt(), request.getStatus(),
-                request.getPhotoKeys().size()));
+                request.getPhotoKeys().size(), Money.of(request.getBudgetAmount(), request.getBudgetCurrency())));
     }
 
     /** Un técnico se postuló con su precio propuesto. */
