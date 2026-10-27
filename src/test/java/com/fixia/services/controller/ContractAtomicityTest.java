@@ -80,7 +80,7 @@ class ContractAtomicityTest {
         Instant now = Instant.now();
         ServiceRequest request = ServiceRequest.publish(CLIENT, ServiceCategory.PLUMBING, "Fuga de agua",
                 new ApproximateLocation("Bogotá", "Chapinero"), new ExactLocation("Calle 10 # 5-20"),
-                now.plus(Duration.ofDays(5)), List.of(), now);
+                now.plus(Duration.ofDays(5)), new BigDecimal("200000"), CurrencyCode.COP, List.of(), now);
         request.selectProvider(PROVIDER, now);
         ServiceRequest saved = serviceRequestRepository.saveAndFlush(request);
         Quotation quotation = quotationRepository.saveAndFlush(Quotation.send(saved, PROVIDER,

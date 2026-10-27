@@ -57,7 +57,8 @@ class ApplicationServiceDuplicateTest {
     @SuppressWarnings("unchecked")
     void setUp() {
         request = ServiceRequest.publish(UUID.randomUUID(), ServiceCategory.PLUMBING, "Fuga",
-                new ApproximateLocation("Bogotá", "Chapinero"), null, NOW.plus(Duration.ofDays(2)), List.of(),
+                new ApproximateLocation("Bogotá", "Chapinero"), null, NOW.plus(Duration.ofDays(2)),
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(),
                 NOW.minusSeconds(60));
         ReflectionTestUtils.setField(request, "id", UUID.randomUUID());
         when(requests.findById(request.getId())).thenReturn(Optional.of(request));

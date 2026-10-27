@@ -24,7 +24,8 @@ class QuotationTest {
     private static ServiceRequest selectedRequest() {
         ServiceRequest request = ServiceRequest.publish(UUID.randomUUID(), ServiceCategory.PLUMBING,
                 "Fuga de agua en el baño", new ApproximateLocation("Bogotá", "Chapinero"), null,
-                NOW.plus(Duration.ofDays(5)), List.of(), NOW.minusSeconds(3600));
+                NOW.plus(Duration.ofDays(5)),
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), NOW.minusSeconds(3600));
         ReflectionTestUtils.setField(request, "id", UUID.randomUUID());
         request.selectProvider(PROVIDER, NOW.minusSeconds(60));
         return request;
@@ -63,7 +64,8 @@ class QuotationTest {
                 .hasMessage("Solo el prestador seleccionado puede cotizar esta solicitud");
 
         ServiceRequest published = ServiceRequest.publish(UUID.randomUUID(), ServiceCategory.PLUMBING, "Fuga",
-                new ApproximateLocation("Bogotá", "Chapinero"), null, NOW.plus(Duration.ofDays(5)), List.of(),
+                new ApproximateLocation("Bogotá", "Chapinero"), null, NOW.plus(Duration.ofDays(5)),
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(),
                 NOW.minusSeconds(60));
         ReflectionTestUtils.setField(published, "id", UUID.randomUUID());
         assertThatThrownBy(() -> send(published, PROVIDER, "350000"))

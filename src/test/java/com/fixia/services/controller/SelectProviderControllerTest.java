@@ -99,7 +99,8 @@ class SelectProviderControllerTest {
         Instant now = Instant.now();
         return serviceRequestRepository.saveAndFlush(ServiceRequest.publish(clientId, ServiceCategory.PLUMBING,
                 "Fuga de agua en el baño", new ApproximateLocation("Bogotá", "Chapinero", 4.6533, -74.0836),
-                new ExactLocation("Calle 10 # 5-20, apto 301"), now.plus(Duration.ofDays(2)), List.of(), now));
+                new ExactLocation("Calle 10 # 5-20, apto 301"), now.plus(Duration.ofDays(2)),
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), now));
     }
 
     private ServiceRequestApplication applied(ServiceRequest request, UUID provider, Instant at) {

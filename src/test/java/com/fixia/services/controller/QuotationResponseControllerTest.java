@@ -90,7 +90,8 @@ class QuotationResponseControllerTest {
     private ServiceRequest selectedRequest(UUID clientId, UUID providerId) {
         Instant now = Instant.now();
         ServiceRequest request = ServiceRequest.publish(clientId, ServiceCategory.PLUMBING, "Fuga de agua en el baño",
-                new ApproximateLocation("Bogotá", "Chapinero"), null, now.plus(Duration.ofDays(5)), List.of(), now);
+                new ApproximateLocation("Bogotá", "Chapinero"), null, now.plus(Duration.ofDays(5)),
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), now);
         request.selectProvider(providerId, now);
         return serviceRequestRepository.saveAndFlush(request);
     }
