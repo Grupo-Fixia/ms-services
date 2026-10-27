@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -37,6 +38,12 @@ public class ServiceRequestHistory {
     public void record(UUID serviceRequestId, ServiceRequestStatus from, ServiceRequestStatus to, UUID actorId,
                        ActorRole actorRole, String reason, Instant at) {
         repository.save(ServiceRequestTransition.of(serviceRequestId, from, to, actorId, actorRole, reason, at));
+    }
+
+    /** El último cambio de la solicitud, si tiene historial. */
+    @Transactional(readOnly = true)
+    public Optional<ServiceRequestTransition> latest(UUID serviceRequestId) {
+        return repository.findFirstByServiceRequestIdOrderByOccurredAtDescIdDesc(serviceRequestId);
     }
 
     /** Historial de la solicitud, del más antiguo al más reciente. */

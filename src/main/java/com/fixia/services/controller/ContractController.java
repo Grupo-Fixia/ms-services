@@ -57,6 +57,17 @@ public class ContractController {
     }
 
     /**
+     * El prestador contratado declara que terminó (GC-441): {@code IN_PROGRESS -> TECHNICIAN_FINISHED}. Sin cuerpo y sin
+     * evidencias obligatorias. No cierra el servicio: el cierre lo confirma el cliente. Repetirlo responde lo mismo (200)
+     * sin cambiar nada; desde otro estado, 409.
+     */
+    @PostMapping("/{contractId}/finish")
+    public ContractResponse finish(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID contractId) {
+        ContractService.ContractView view = service.finish(providerId(jwt), contractId);
+        return ContractResponse.from(view.contract(), view.request(), view.timeline());
+    }
+
+    /**
      * Si el "sub" no tiene el formato esperado la sesión se trata como inválida: la excepción de autenticación
      * llega al mismo 401 que cualquier otro token inválido.
      */

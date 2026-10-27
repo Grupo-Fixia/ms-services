@@ -30,7 +30,10 @@
         "cotizacion.enviada",
         "cotizacion.rechazada",
         "servicio.contratado",
-        "servicio.iniciado"
+        "servicio.iniciado",
+        "servicio.finalizado",
+        "servicio.cierre_objetado",
+        "servicio.cerrado"
       ]
     },
     "schemaVersion": {
