@@ -210,6 +210,24 @@ public class ServiceRequest {
         transitionTo(ServiceRequestStatus.IN_PROGRESS, now);
     }
 
+    /** El técnico contratado declara que terminó (GC-441). Solo desde {@code IN_PROGRESS}; todavía no es el cierre. */
+    public void finish(Instant now) {
+        transitionTo(ServiceRequestStatus.TECHNICIAN_FINISHED, now);
+    }
+
+    /** El cliente confirma el cierre (GC-441). Solo desde {@code TECHNICIAN_FINISHED}; es definitivo. */
+    public void close(Instant now) {
+        transitionTo(ServiceRequestStatus.CLOSED, now);
+    }
+
+    /**
+     * El cliente objeta el cierre (GC-441): el servicio vuelve a {@code IN_PROGRESS} en vez de cerrarse. Solo desde
+     * {@code TECHNICIAN_FINISHED}: un servicio cerrado no se reabre.
+     */
+    public void objectClosure(Instant now) {
+        transitionTo(ServiceRequestStatus.IN_PROGRESS, now);
+    }
+
     public void cancel(Instant now) {
         transitionTo(ServiceRequestStatus.CANCELLED, now);
     }

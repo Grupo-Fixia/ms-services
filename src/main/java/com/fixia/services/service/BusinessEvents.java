@@ -34,6 +34,9 @@ public final class BusinessEvents {
     public static final String QUOTATION_REJECTED = "cotizacion.rechazada";
     public static final String SERVICE_CONTRACTED = "servicio.contratado";
     public static final String SERVICE_STARTED = "servicio.iniciado";
+    public static final String SERVICE_FINISHED = "servicio.finalizado";
+    public static final String CLOSURE_OBJECTED = "servicio.cierre_objetado";
+    public static final String SERVICE_CLOSED = "servicio.cerrado";
 
     private static final short V1 = 1;
 
@@ -105,6 +108,19 @@ public final class BusinessEvents {
                           ServiceRequestStatus status) {
     }
 
+    record ServiceFinished(UUID contractId, UUID serviceRequestId, UUID clientId, UUID providerId, Instant finishedAt,
+                           ServiceRequestStatus status) {
+    }
+
+    /** Sin el motivo de la objeción: puede traer datos personales y vive solo en el historial de los participantes. */
+    record ClosureObjected(UUID contractId, UUID serviceRequestId, UUID clientId, UUID providerId, Instant objectedAt,
+                           ServiceRequestStatus status) {
+    }
+
+    record ServiceClosed(UUID contractId, UUID serviceRequestId, UUID clientId, UUID providerId, Instant closedAt,
+                         ServiceRequestStatus status) {
+    }
+
     /** El cliente publicó la solicitud. Solo ubicación aproximada, el número de fotos y su presupuesto orientativo. */
     public static Event requestPublished(ServiceRequest request) {
         ApproximateLocation location = request.getApproximateLocation();
@@ -161,5 +177,27 @@ public final class BusinessEvents {
     public static Event serviceStarted(ServiceContract contract, Instant startedAt) {
         return new Event(SERVICE_STARTED, V1, new ServiceStarted(contract.getId(), contract.getServiceRequestId(),
                 contract.getClientId(), contract.getProviderId(), startedAt, ServiceRequestStatus.IN_PROGRESS));
+    }
+
+    /**
+     * El prestador declaró que terminó (GC-441): {@code IN_PROGRESS -> TECHNICIAN_FINISHED}. Sin {@code evidenceCount}:
+     * las evidencias llegan con GC-439, que lo agregará como campo opcional.
+     */
+    public static Event serviceFinished(ServiceContract contract, Instant finishedAt) {
+        return new Event(SERVICE_FINISHED, V1, new ServiceFinished(contract.getId(), contract.getServiceRequestId(),
+                contract.getClientId(), contract.getProviderId(), finishedAt,
+                ServiceRequestStatus.TECHNICIAN_FINISHED));
+    }
+
+    /** El cliente objetó el cierre (GC-441): el servicio volvió a {@code IN_PROGRESS}. No lleva el texto del motivo. */
+    public static Event closureObjected(ServiceContract contract, Instant objectedAt) {
+        return new Event(CLOSURE_OBJECTED, V1, new ClosureObjected(contract.getId(), contract.getServiceRequestId(),
+                contract.getClientId(), contract.getProviderId(), objectedAt, ServiceRequestStatus.IN_PROGRESS));
+    }
+
+    /** El cliente confirmó el cierre (GC-441): {@code TECHNICIAN_FINISHED -> CLOSED}, definitivo. */
+    public static Event serviceClosed(ServiceContract contract, Instant closedAt) {
+        return new Event(SERVICE_CLOSED, V1, new ServiceClosed(contract.getId(), contract.getServiceRequestId(),
+                contract.getClientId(), contract.getProviderId(), closedAt, ServiceRequestStatus.CLOSED));
     }
 }

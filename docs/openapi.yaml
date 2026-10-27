@@ -16,7 +16,7 @@ info:
     responde, la petición se rechaza con 401 (el servicio falla cerrado).
 
     Privacidad: la dirección exacta se guarda pero no se devuelve mientras la solicitud no esté contratada
-    (`CONTRACTED`) ni en curso (`IN_PROGRESS`). La ubicación aproximada devuelve las coordenadas redondeadas a dos decimales (~1 km).
+    (`CONTRACTED`); desde ahí se entrega también en `IN_PROGRESS`, `TECHNICIAN_FINISHED` y `CLOSED`. La ubicación aproximada devuelve las coordenadas redondeadas a dos decimales (~1 km).
 servers:
   - url: http://localhost
     description: Traefik (docker compose)
@@ -601,6 +601,135 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
 
+  /api/services/contracts/{contractId}/finish:
+    post:
+      summary: Declarar finalizado el servicio, como técnico (GC-441)
+      description: |
+        Solo `ROLE_PROFESSIONAL`, y solo el prestador de esa contratación. Sin cuerpo y sin evidencias obligatorias (son
+        opcionales y llegan con GC-439). El servicio pasa de `IN_PROGRESS` a `TECHNICIAN_FINISHED`; **no** queda cerrado:
+        el cierre lo confirma el cliente o lo objeta. Cambio de estado, historial y evento `servicio.finalizado` en una sola
+        transacción.
+
+        Repetirlo sobre un servicio ya finalizado responde 200 con el estado actual, sin cambio ni evento nuevo. Si la
+        contratación no existe, es de otro prestador o el id no es un UUID, la misma 404 "Contratación no encontrada".
+        Sin haber iniciado el servicio, o ya cerrado, 409.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: "La contratación con el servicio finalizado (`serviceStatus: TECHNICIAN_FINISHED`) y su historial."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: El servicio no está en curso (título "Transición de estado no permitida").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/services/requests/{id}/closure:
+    post:
+      summary: Confirmar el cierre del servicio, como cliente (GC-441)
+      description: |
+        Solo `ROLE_CLIENT`, y solo el dueño de la solicitud. Sin cuerpo. El servicio pasa de `TECHNICIAN_FINISHED` a `CLOSED`,
+        definitivo, y habilita la evaluación posterior. Cambio de estado, historial y evento `servicio.cerrado` en una sola
+        transacción. No hay cierre automático por silencio.
+
+        Confirmar un servicio ya cerrado responde 200 con el estado actual, sin duplicar nada (cierre doble). Una solicitud
+        ajena o inexistente da la misma 404 "Solicitud no encontrada". Si el técnico aún no lo declaró finalizado, 409.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: "La contratación con el servicio cerrado (`serviceStatus: CLOSED`) y su historial."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: El técnico aún no declaró finalizado el servicio (título "Transición de estado no permitida").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/services/requests/{id}/closure-objection:
+    post:
+      summary: Objetar el cierre del servicio, como cliente (GC-441)
+      description: |
+        Solo `ROLE_CLIENT`, y solo el dueño de la solicitud. El cliente no confirma el cierre: el servicio pasa de
+        `TECHNICIAN_FINISHED` a `IN_PROGRESS` con el motivo registrado en el historial, que ven el cliente y el técnico. No es
+        un cierre satisfactorio ni una disputa formal (fuera del sprint). El evento `servicio.cierre_objetado` **no** lleva el
+        texto del motivo. Después el técnico puede declarar finalizado otra vez y el cliente cerrar.
+
+        Repetir la misma objeción sobre el servicio ya devuelto a `IN_PROGRESS` responde 200 sin duplicar. Un servicio ya
+        cerrado no se puede objetar (409), ni tampoco desde cualquier otro estado distinto de `TECHNICIAN_FINISHED`, ni con
+        un motivo diferente al último.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClosureObjection'
+      responses:
+        '200':
+          description: "La contratación con el servicio de vuelta en curso (`serviceStatus: IN_PROGRESS`) y su historial."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: El servicio no está finalizado por el técnico, o ya está cerrado (título "Transición de estado no permitida").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
   /api/services/quotations:
     post:
       summary: Crear y enviar una cotización (GC-354)
@@ -775,12 +904,14 @@ components:
 
     ServiceRequestStatus:
       type: string
-      enum: [PUBLISHED, PROVIDER_SELECTED, CONTRACTED, IN_PROGRESS, CANCELLED, EXPIRED]
+      enum: [PUBLISHED, PROVIDER_SELECTED, CONTRACTED, IN_PROGRESS, TECHNICIAN_FINISHED, CLOSED, CANCELLED, EXPIRED]
       description: |
         `PUBLISHED` → `PROVIDER_SELECTED` | `CANCELLED` | `EXPIRED`; `PROVIDER_SELECTED` → `CONTRACTED` | `CANCELLED`;
-        `CONTRACTED` → `IN_PROGRESS` (el prestador contratado inicia el servicio, GC-437).
-        `IN_PROGRESS`, `CANCELLED` y `EXPIRED` no tienen más transiciones por ahora: la finalización por el técnico y el
-        cierre por el cliente llegan con GC-441. La dirección exacta se entrega en `CONTRACTED` y `IN_PROGRESS`.
+        `CONTRACTED` → `IN_PROGRESS` (el prestador contratado inicia el servicio, GC-437);
+        `IN_PROGRESS` → `TECHNICIAN_FINISHED` (el técnico declara que terminó, GC-441);
+        `TECHNICIAN_FINISHED` → `CLOSED` (el cliente confirma el cierre) | `IN_PROGRESS` (el cliente lo objeta).
+        `CLOSED`, `CANCELLED` y `EXPIRED` son terminales: un servicio cerrado no se reabre. La dirección exacta se
+        entrega desde `CONTRACTED`, también una vez cerrado.
 
     CreateServiceRequest:
       type: object
@@ -800,7 +931,7 @@ components:
         exactLocation:
           type: object
           required: [address]
-          description: Opcional. Se guarda protegida y no se devuelve hasta que la solicitud esté contratada (`CONTRACTED` o `IN_PROGRESS`).
+          description: Opcional. Se guarda protegida y no se devuelve hasta que la solicitud esté contratada (`CONTRACTED`, `IN_PROGRESS`, `TECHNICIAN_FINISHED` o `CLOSED`).
           properties:
             address: { type: string, maxLength: 255, example: 'Calle 10 # 5-20, apto 301' }
             latitude: { type: number, format: double, minimum: -90, maximum: 90 }
@@ -849,7 +980,7 @@ components:
             longitude: { type: number, format: double, nullable: true }
         exactLocation:
           type: object
-          description: Solo presente cuando la solicitud está contratada (`CONTRACTED` o `IN_PROGRESS`) y el cliente indicó una dirección.
+          description: Solo presente cuando la solicitud está contratada (`CONTRACTED`, `IN_PROGRESS`, `TECHNICIAN_FINISHED` o `CLOSED`) y el cliente indicó una dirección.
           properties:
             address: { type: string }
             latitude: { type: number, format: double, nullable: true }
@@ -1070,16 +1201,27 @@ components:
                 longitude: { type: number, format: double, nullable: true }
             exactLocation:
               type: object
-              description: Presente porque la solicitud ya está contratada (`CONTRACTED` o `IN_PROGRESS`), si el cliente indicó una dirección.
+              description: Presente porque la solicitud ya está contratada (`CONTRACTED`, `IN_PROGRESS`, `TECHNICIAN_FINISHED` o `CLOSED`), si el cliente indicó una dirección.
               properties:
                 address: { type: string }
                 latitude: { type: number, format: double, nullable: true }
                 longitude: { type: number, format: double, nullable: true }
             expectedAt: { type: string, format: date-time }
 
+    ClosureObjection:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Motivo de la objeción (GC-441). Queda en el historial de los participantes; no viaja en el evento.
+          example: El grifo sigue goteando después del arreglo
+
     Transition:
       type: object
-      description: Un cambio de estado del servicio (GC-437).
+      description: Un cambio de estado del servicio (GC-437, GC-441).
       properties:
         fromStatus:
           allOf:

@@ -365,18 +365,113 @@ class ServiceRequestTest {
         }
     }
 
+    private static ServiceRequest inProgress() {
+        ServiceRequest request = published();
+        request.selectProvider(PROVIDER, NOW);
+        request.contract(NOW);
+        request.start(NOW);
+        return request;
+    }
+
+    private static ServiceRequest finished() {
+        ServiceRequest request = inProgress();
+        request.finish(NOW.plusSeconds(60));
+        return request;
+    }
+
+    @Test
+    void elTecnicoDeclaraFinalizadoUnServicioEnCurso() {
+        ServiceRequest request = inProgress();
+
+        request.finish(NOW.plusSeconds(60));
+
+        assertThat(request.getStatus()).isEqualTo(ServiceRequestStatus.TECHNICIAN_FINISHED);
+        assertThat(request.getUpdatedAt()).isEqualTo(NOW.plusSeconds(60));
+    }
+
+    @Test
+    void soloSePuedeDeclararFinalizadoDesdeEnCurso() {
+        ServiceRequest published = published();
+        ServiceRequest contracted = published();
+        contracted.selectProvider(PROVIDER, NOW);
+        contracted.contract(NOW);
+
+        for (ServiceRequest request : List.of(published, contracted, finished())) {
+            ServiceRequestStatus before = request.getStatus();
+            assertThatThrownBy(() -> request.finish(NOW.plusSeconds(1)))
+                    .isInstanceOf(InvalidStatusTransitionException.class);
+            assertThat(request.getStatus()).isEqualTo(before);
+        }
+    }
+
+    @Test
+    void elClienteConfirmaElCierreDeUnServicioFinalizado() {
+        ServiceRequest request = finished();
+
+        request.close(NOW.plusSeconds(120));
+
+        assertThat(request.getStatus()).isEqualTo(ServiceRequestStatus.CLOSED);
+        assertThat(request.getUpdatedAt()).isEqualTo(NOW.plusSeconds(120));
+    }
+
+    @Test
+    void noSePuedeCerrarSinQueElTecnicoLoDeclareFinalizado() {
+        ServiceRequest request = inProgress();
+
+        assertThatThrownBy(() -> request.close(NOW.plusSeconds(1)))
+                .isInstanceOf(InvalidStatusTransitionException.class)
+                .hasMessageContaining("IN_PROGRESS")
+                .hasMessageContaining("CLOSED");
+        assertThat(request.getStatus()).isEqualTo(ServiceRequestStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void laObjecionDelClienteDevuelveElServicioAEnCursoYNoLoCierra() {
+        ServiceRequest request = finished();
+
+        request.objectClosure(NOW.plusSeconds(120));
+
+        assertThat(request.getStatus()).isEqualTo(ServiceRequestStatus.IN_PROGRESS);
+        // Tras la objeción el técnico puede declarar finalizado otra vez y el cliente cerrar.
+        request.finish(NOW.plusSeconds(180));
+        request.close(NOW.plusSeconds(240));
+        assertThat(request.getStatus()).isEqualTo(ServiceRequestStatus.CLOSED);
+    }
+
+    @Test
+    void soloSePuedeObjetarUnServicioFinalizado() {
+        for (ServiceRequest request : List.of(inProgress(), published())) {
+            assertThatThrownBy(() -> request.objectClosure(NOW.plusSeconds(1)))
+                    .isInstanceOf(InvalidStatusTransitionException.class);
+        }
+    }
+
+    @Test
+    void unServicioCerradoNoVuelveAEjecucionNiAFinalizado() {
+        ServiceRequest closed = finished();
+        closed.close(NOW.plusSeconds(120));
+
+        assertThatThrownBy(() -> closed.objectClosure(NOW.plusSeconds(180)))
+                .isInstanceOf(InvalidStatusTransitionException.class);
+        assertThatThrownBy(() -> closed.start(NOW.plusSeconds(180)))
+                .isInstanceOf(InvalidStatusTransitionException.class);
+        assertThatThrownBy(() -> closed.finish(NOW.plusSeconds(180)))
+                .isInstanceOf(InvalidStatusTransitionException.class);
+        assertThatThrownBy(() -> closed.close(NOW.plusSeconds(180)))
+                .isInstanceOf(InvalidStatusTransitionException.class);
+        assertThat(closed.getStatus()).isEqualTo(ServiceRequestStatus.CLOSED);
+    }
+
     @Test
     void losEstadosSinSiguienteEtapaNoPermitenNingunCambio() {
-        ServiceRequest inProgress = published();
-        inProgress.selectProvider(PROVIDER, NOW);
-        inProgress.contract(NOW);
-        inProgress.start(NOW);
+        ServiceRequest closed = finished();
+        closed.close(NOW.plusSeconds(120));
         ServiceRequest cancelled = published();
         cancelled.cancel(NOW);
         ServiceRequest expired = published();
         expired.expire(NOW);
 
-        for (ServiceRequest terminal : List.of(inProgress, cancelled, expired)) {
+        for (ServiceRequest terminal : List.of(closed, cancelled, expired)) {
             ServiceRequestStatus before = terminal.getStatus();
             assertThatThrownBy(() -> terminal.cancel(NOW)).isInstanceOf(InvalidStatusTransitionException.class);
             assertThatThrownBy(() -> terminal.expire(NOW)).isInstanceOf(InvalidStatusTransitionException.class);
@@ -435,6 +530,19 @@ class ServiceRequestTest {
         assertThat(request.isExactLocationVisible()).isTrue();
         assertThat(request.getExactLocation()).hasValueSatisfying(location ->
                 assertThat(location.address()).isEqualTo("Calle 10 # 5-20, apto 301"));
+    }
+
+    @Test
+    void laDireccionExactaSigueDisponibleFinalizadoYCerrado() {
+        ServiceRequest finished = finished();
+        ServiceRequest closed = finished();
+        closed.close(NOW.plusSeconds(120));
+
+        for (ServiceRequest request : List.of(finished, closed)) {
+            assertThat(request.isExactLocationVisible()).isTrue();
+            assertThat(request.getExactLocation()).hasValueSatisfying(location ->
+                    assertThat(location.address()).isEqualTo("Calle 10 # 5-20, apto 301"));
+        }
     }
 
     @Test

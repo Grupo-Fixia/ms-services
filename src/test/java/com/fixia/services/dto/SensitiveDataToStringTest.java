@@ -35,6 +35,13 @@ class SensitiveDataToStringTest {
     }
 
     @Test
+    void elMotivoDeLaObjecionAlCierreNoSeImprime() {
+        ClosureObjectionRequest request = new ClosureObjectionRequest("El grifo de mi casa en la Calle 10 sigue roto");
+
+        assertThat(request.toString()).doesNotContain("grifo", "Calle 10");
+    }
+
+    @Test
     void laDireccionExactaNoSeImprime() {
         assertThat(new ExactLocationRequest("Calle 10 # 5-20", 4.7, -74.1).toString())
                 .doesNotContain("Calle 10");
