@@ -80,7 +80,7 @@ aceptar una cotización ya aceptada con el contrato ya creado) no publica otro e
 | `solicitud.publicada` | `ServiceRequestService#create` (RF-020) | Cliente | Categoría, descripción, ubicación **aproximada**, momento esperado, número de fotos |
 | `postulacion.registrada` | `ApplicationService#apply` (RF-024, GC-423) | Técnico | Postulación, prestador y **precio propuesto** |
 | `prestador.seleccionado` | `ServiceRequestService#selectProvider` (RF-026 a RF-028) | Cliente | Postulación y prestador elegidos, su precio, postulaciones rechazadas |
-| `cotizacion.enviada` | `QuotationService#send` (RF-031) | Técnico | Precio, alcance, condiciones, fecha acordada, vigencia y cotizaciones que reemplaza o vence |
+| `cotizacion.enviada` | `QuotationService#send` (RF-031) | Técnico | Precio, alcance, condiciones, fecha acordada, vigencia, cotizaciones que reemplaza o vence y, opcional, el número de versión (`revision`, GC-427) |
 | `cotizacion.rechazada` | `QuotationService#reject` (RF-032, RF-033) | Cliente | Cotización y precio rechazados |
 | `servicio.contratado` | `QuotationService#accept`, al crear el contrato (RF-034, RF-035, ADR-046) | Cliente | Copia inmutable de lo contratado: precio, alcance, condiciones, fecha acordada y de contratación |
 | `servicio.iniciado` | `ContractService#start`, al pasar de `CONTRACTED` a `IN_PROGRESS` (RF-045, GC-437) | Técnico | Contrato, solicitud, cliente y prestador, momento del inicio y estado `IN_PROGRESS` |
@@ -172,7 +172,8 @@ escribe el contenido del evento en los logs (solo `eventId`, `eventType` y la se
 - **Cambio compatible, misma versión:** agregar un campo opcional a `data`. Los consumidores deben ignorar los campos
   que no conocen (lector tolerante) y el esquema se actualiza en el mismo PR. Ejemplo real próximo: la postulación
   empresarial (GC-468) agregará a `postulacion.registrada` los campos opcionales `providerType` (`INDEPENDENT` o
-  `COMPANY`) y `technicianId`; sigue siendo la versión 1.
+  `COMPANY`) y `technicianId`; sigue siendo la versión 1. Ya hecho así: `budget` en `solicitud.publicada` (GC-421) y
+  `revision` en `cotizacion.enviada` (GC-427).
 - **Cambio incompatible, versión nueva:** quitar o renombrar un campo, cambiar su tipo o su significado, o volver
   obligatorio uno opcional. Se crea `<tipo>.v2.schema.json`, `ms-services` publica la versión nueva y el consumidor
   debe aceptar la versión nueva y la anterior durante la transición. Ejemplo: si `proposedPrice` dejara de ser un

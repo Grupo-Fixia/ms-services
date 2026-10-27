@@ -77,10 +77,12 @@ public class QuotationService {
         }
 
         Instant now = clock.instant();
+        // La solicitud ya está bloqueada: nadie más puede enviar o responder a la vez, así que máximo + 1 no se repite.
+        int revision = quotationRepository.maxRevision(request.getId()) + 1;
         Quotation quotation;
         try {
             quotation = Quotation.send(request, providerId, body.amount(), body.currency(), body.scope(),
-                    body.conditions(), body.agreedAt(), body.validUntil(), now);
+                    body.conditions(), body.agreedAt(), body.validUntil(), revision, now);
         } catch (IllegalArgumentException e) {
             // Reglas del dominio que la validación del cuerpo no cubre (fechas frente al reloj del servicio).
             throw new InvalidQuotationException(e.getMessage(), e);
@@ -105,8 +107,8 @@ public class QuotationService {
     @Transactional(readOnly = true)
     public List<Quotation> listMine(UUID providerId, UUID serviceRequestId) {
         return serviceRequestId == null
-                ? quotationRepository.findByProviderIdOrderByCreatedAtDesc(providerId)
-                : quotationRepository.findByProviderIdAndServiceRequestIdOrderByCreatedAtDesc(providerId,
+                ? quotationRepository.findByProviderIdOrderByCreatedAtDescIdDesc(providerId)
+                : quotationRepository.findByProviderIdAndServiceRequestIdOrderByRevisionDesc(providerId,
                 serviceRequestId);
     }
 
@@ -126,7 +128,7 @@ public class QuotationService {
         serviceRequestRepository.findById(serviceRequestId)
                 .filter(request -> request.getClientId().equals(clientId))
                 .orElseThrow(ServiceRequestNotFoundException::new);
-        return quotationRepository.findByServiceRequestIdOrderByCreatedAtDesc(serviceRequestId);
+        return quotationRepository.findByServiceRequestIdOrderByRevisionDesc(serviceRequestId);
     }
 
     /**

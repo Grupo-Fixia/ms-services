@@ -65,6 +65,13 @@ public class Quotation {
     @Column(name = "valid_until", nullable = false, updatable = false)
     private Instant validUntil;
 
+    /**
+     * Número de versión dentro de la solicitud (GC-427): 1 es la primera cotización, 2 el primer ajuste, y así. Se asigna
+     * al enviar, con la solicitud bloqueada, y nunca cambia. No confundir con {@link #version}, el candado optimista.
+     */
+    @Column(name = "revision", nullable = false, updatable = false)
+    private int revision;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private QuotationStatus status;
@@ -87,8 +94,10 @@ public class Quotation {
     }
 
     private Quotation(ServiceRequest request, UUID providerId, BigDecimal amount, CurrencyCode currency,
-                      String scope, String conditions, Instant agreedAt, Instant validUntil, Instant now) {
+                      String scope, String conditions, Instant agreedAt, Instant validUntil, int revision,
+                      Instant now) {
         this.serviceRequestId = request.getId();
+        this.revision = revision;
         this.providerId = providerId;
         this.amount = amount.setScale(AMOUNT_SCALE);
         this.currency = currency;
@@ -108,11 +117,14 @@ public class Quotation {
      * @param providerId prestador que cotiza; debe ser el seleccionado de la solicitud
      * @param agreedAt   fecha acordada para el servicio; posterior al envío
      * @param validUntil vigencia de la cotización; posterior al envío y no posterior a la fecha acordada
+     * @param revision   número de versión en la solicitud (GC-427), 1 o más; lo asigna el servicio con la solicitud
+     *                   bloqueada
      * @throws IllegalArgumentException si falta un dato, alguno no cumple las reglas o quien cotiza no es el
      *                                  prestador seleccionado de una solicitud con selección vigente
      */
     public static Quotation send(ServiceRequest request, UUID providerId, BigDecimal amount, CurrencyCode currency,
-                                 String scope, String conditions, Instant agreedAt, Instant validUntil, Instant now) {
+                                 String scope, String conditions, Instant agreedAt, Instant validUntil, int revision,
+                                 Instant now) {
         require(request != null && request.getId() != null, "La solicitud es obligatoria");
         require(providerId != null, "El prestador es obligatorio");
         require(request.getStatus() == ServiceRequestStatus.PROVIDER_SELECTED,
@@ -131,7 +143,9 @@ public class Quotation {
         require(validUntil != null, "La vigencia es obligatoria");
         require(validUntil.isAfter(now), "La vigencia debe ser posterior al envío");
         require(!validUntil.isAfter(agreedAt), "La vigencia no puede ser posterior a la fecha acordada");
-        return new Quotation(request, providerId, amount, currency, scope, conditions, agreedAt, validUntil, now);
+        require(revision >= 1, "La versión de la cotización debe ser mayor que cero");
+        return new Quotation(request, providerId, amount, currency, scope, conditions, agreedAt, validUntil, revision,
+                now);
     }
 
     /** Si la cotización sigue esperando respuesta pero ya pasó su vigencia. */
@@ -199,6 +213,11 @@ public class Quotation {
 
     public UUID getServiceRequestId() {
         return serviceRequestId;
+    }
+
+    /** Número de versión visible dentro de la solicitud (1, 2, 3...), distinto del candado optimista {@link #getVersion()}. */
+    public int getRevision() {
+        return revision;
     }
 
     public UUID getProviderId() {
