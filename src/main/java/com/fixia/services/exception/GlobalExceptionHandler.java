@@ -167,6 +167,17 @@ public class GlobalExceptionHandler {
         return problem;
     }
 
+    /**
+     * La solicitud no está en un estado desde el que se pueda hacer lo pedido (por ejemplo, iniciar un servicio que no
+     * está contratado). Sin este manejador sería un 500.
+     */
+    @ExceptionHandler(InvalidStatusTransitionException.class)
+    public ProblemDetail handleInvalidStatusTransition(InvalidStatusTransitionException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Transición de estado no permitida");
+        return problem;
+    }
+
     @ExceptionHandler(ContractNotFoundException.class)
     public ProblemDetail handleContractNotFound(ContractNotFoundException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());

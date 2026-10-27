@@ -205,6 +205,11 @@ public class ServiceRequest {
         transitionTo(ServiceRequestStatus.CONTRACTED, now);
     }
 
+    /** El prestador contratado inicia el servicio (GC-437). Solo se puede desde {@code CONTRACTED}. */
+    public void start(Instant now) {
+        transitionTo(ServiceRequestStatus.IN_PROGRESS, now);
+    }
+
     public void cancel(Instant now) {
         transitionTo(ServiceRequestStatus.CANCELLED, now);
     }
@@ -214,10 +219,12 @@ public class ServiceRequest {
     }
 
     public boolean isExactLocationVisible() {
-        return status == ServiceRequestStatus.CONTRACTED;
+        return status.exposesExactLocation();
     }
 
-    /** Dirección exacta; vacía mientras la solicitud no esté contratada, o si el cliente no la indicó. */
+    /**
+     * Dirección exacta; vacía mientras la solicitud no esté contratada (ni en curso), o si el cliente no la indicó.
+     */
     public Optional<ExactLocation> getExactLocation() {
         if (!isExactLocationVisible() || exactAddress == null) {
             return Optional.empty();

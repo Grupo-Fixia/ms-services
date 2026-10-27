@@ -33,6 +33,7 @@ public final class BusinessEvents {
     public static final String QUOTATION_SENT = "cotizacion.enviada";
     public static final String QUOTATION_REJECTED = "cotizacion.rechazada";
     public static final String SERVICE_CONTRACTED = "servicio.contratado";
+    public static final String SERVICE_STARTED = "servicio.iniciado";
 
     private static final short V1 = 1;
 
@@ -100,6 +101,10 @@ public final class BusinessEvents {
                              ServiceRequestStatus status) {
     }
 
+    record ServiceStarted(UUID contractId, UUID serviceRequestId, UUID clientId, UUID providerId, Instant startedAt,
+                          ServiceRequestStatus status) {
+    }
+
     /** El cliente publicó la solicitud. Solo ubicación aproximada, el número de fotos y su presupuesto orientativo. */
     public static Event requestPublished(ServiceRequest request) {
         ApproximateLocation location = request.getApproximateLocation();
@@ -150,5 +155,11 @@ public final class BusinessEvents {
                 contract.getProviderId(), Money.of(contract.getAmount(), contract.getCurrency()), contract.getScope(),
                 contract.getConditions(), contract.getAgreedAt(), contract.getContractedAt(),
                 ServiceRequestStatus.CONTRACTED));
+    }
+
+    /** El prestador contratado inició el servicio (GC-437): la solicitud pasó de CONTRACTED a IN_PROGRESS. */
+    public static Event serviceStarted(ServiceContract contract, Instant startedAt) {
+        return new Event(SERVICE_STARTED, V1, new ServiceStarted(contract.getId(), contract.getServiceRequestId(),
+                contract.getClientId(), contract.getProviderId(), startedAt, ServiceRequestStatus.IN_PROGRESS));
     }
 }
