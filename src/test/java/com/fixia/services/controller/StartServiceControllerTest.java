@@ -126,7 +126,7 @@ class StartServiceControllerTest {
         ServiceRequest saved = serviceRequestRepository.saveAndFlush(request);
         Quotation quotation = quotationRepository.saveAndFlush(Quotation.send(saved, PROVIDER,
                 new BigDecimal("150000.50"), CurrencyCode.COP, "Cambio de tubería", "Incluye materiales",
-                now.plus(Duration.ofDays(3)), now.plus(Duration.ofDays(1)), now));
+                now.plus(Duration.ofDays(3)), now.plus(Duration.ofDays(1)), 1, now));
         mockMvc.perform(post("/api/services/requests/" + saved.getId() + "/quotations/" + quotation.getId()
                 + "/acceptance").with(client(CLIENT))).andExpect(status().isOk());
         return new Contracted(saved, contractRepository.findByServiceRequestId(saved.getId()).orElseThrow());

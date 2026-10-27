@@ -29,6 +29,7 @@
     "validUntil": "2026-10-27T23:59:00Z",
     "sentAt": "2026-10-26T17:00:00Z",
     "status": "SENT",
-    "replacedQuotations": []
+    "replacedQuotations": [],
+    "revision": 2
   }
 }

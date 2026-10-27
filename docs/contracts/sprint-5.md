@@ -40,7 +40,7 @@ tareas del Sprint 5 en Jira.
 | Outbox `outbox_events` y 6 eventos | ms-services | ✅ V7 | GC-433, GC-436 |
 | Presupuesto orientativo en `service_requests` | ms-services | ✅ V8 | GC-421 |
 | Tipo de prestador y técnico propuesto en `applications` | ms-services | 🟡 | GC-468 |
-| Revisión visible de la cotización | ms-services | 🟡 | GC-427 |
+| Revisión visible de la cotización | ms-services | ✅ V11 | GC-427 |
 | Estado `IN_PROGRESS`, inicio y tabla de transiciones | ms-services | ✅ V9 | GC-437 |
 | Finalización, cierre y objeción (`TECHNICIAN_FINISHED`, `CLOSED`) | ms-services | ✅ V10 | GC-441 |
 | Evidencias (metadatos en base, archivo en RustFS) | ms-services | 🟡 | GC-439 |
@@ -76,14 +76,18 @@ Son cuatro datos distintos, en lugares distintos, y ninguno reemplaza a otro:
 - Implementado: la respuesta devuelve el importe con dos decimales (`200000.00`); la entrada acepta `200000` o
   `200000.5`. Una moneda distinta de `COP` o un cuerpo sin importe o sin moneda es 400. Ver el ejemplo en el README.
 
-### 3.2 Cotización versionada (✅ base / 🟡 ajuste GC-427)
+### 3.2 Cotización versionada (✅ GC-427)
 
 - ✅ Ya funciona: cada envío crea una cotización nueva; la `SENT` anterior pasa a `SUPERSEDED` (o `EXPIRED`) en la
   misma transacción, y solo una `SENT` vigente se puede aceptar. Eso es la versión (RF-031, RF-033).
-- 🟡 Se propone exponer `revision` (1, 2, 3… por solicitud) en la respuesta de la cotización y en `cotizacion.enviada`,
-  para que el frontend muestre "versión 2" sin calcularla. Columna `revision INTEGER` asignada con la solicitud
-  bloqueada; `null` no aplica porque se puede calcular para las existentes en la migración.
-- ❓ Contraoferta estructurada del cliente: **fuera** salvo decisión de GC-427 con el PO. El chat prototipo no
+- ✅ `revision` (1, 2, 3… por solicitud) en la respuesta de la cotización y en `cotizacion.enviada` (campo opcional, el
+  evento sigue en la versión 1), para que el frontend muestre "versión 2" sin calcularla. Columna `revision INTEGER NOT NULL`
+  asignada con la solicitud bloqueada, con restricción única `(service_request_id, revision)`; la migración V11 numeró las
+  existentes por antigüedad.
+- ✅ `current` (calculado, sin columna) en la respuesta: verdadero solo en la cotización `SENT` que no ha vencido, la que el
+  cliente aún puede aceptar o rechazar. Cumple «cliente y técnico conocen la versión vigente desde la API» (GC-404).
+- Los listados van de la versión más reciente a la más antigua.
+- ❓ Contraoferta estructurada del cliente: **fuera** salvo decisión del PO con aprobación bilateral. El chat prototipo no
   confirma precios (RN-004, CA-25).
 
 ## 4. Postulación y selección (✅ independiente / 🟡 empresa)
@@ -281,8 +285,8 @@ Todos usan el sobre, el tópico y las reglas de idempotencia de GC-436. Los de m
 
 | Repositorio | Siguiente | Para |
 | --- | --- | --- |
-| ms-services | V11 | V8 es el presupuesto (GC-421), V9 el inicio y el historial (GC-437) y V10 la finalización y el cierre (GC-441), ya tomadas |
-| ms-services | luego | Tipo de prestador (GC-468), evidencias (GC-439), revisión de la cotización (GC-427) |
+| ms-services | V12 | V8 es el presupuesto (GC-421), V9 el inicio y el historial (GC-437), V10 la finalización y el cierre (GC-441) y V11 la versión de la cotización (GC-427), ya tomadas |
+| ms-services | luego | Tipo de prestador (GC-468), evidencias (GC-439) |
 | ms-users | V9 en adelante | V8 es la empresa (GC-466), ya tomada; evaluaciones y su Outbox (GC-444) |
 
 **Regla:** el número lo toma quien **fusiona primero**. Antes de fusionar un PR con migración, se actualiza la rama
@@ -294,7 +298,7 @@ Flyway no arranca.
 | Tema | Propuesta | Quién decide |
 | --- | --- | --- |
 | ~~Presupuesto: valor o rango~~ | **Decidido:** valor único obligatorio en COP (GC-421, GC-422) | — |
-| Número de versión visible de la cotización | Sí, `revision` | GC-427 (Tomás R.) |
+| ~~Número de versión visible de la cotización~~ | **Decidido:** `revision` por solicitud y `current` calculado (GC-427) | — |
 | Contraoferta del cliente | Fuera del sprint | GC-427 con el PO |
 | ~~Objeción al cierre~~ | **Decidido:** vuelve a `IN_PROGRESS` con motivo (GC-441, confirmado por el PO) | — |
 | Límites de evidencias | JPEG, PNG, WebP, PDF; 10 MB; 10 por servicio | GC-439, GC-440, GC-456 |

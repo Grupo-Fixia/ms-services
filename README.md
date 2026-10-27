@@ -236,6 +236,10 @@ Las respuestas (`201` al publicar, `GET /api/services/requests`, `GET /api/servi
 `Quotation` (tabla `quotations`, migración V2): la cotización del prestador seleccionado para una solicitud, con valor,
 moneda, alcance, condiciones, fecha acordada y vigencia (RF-031). El pago del servicio ocurre fuera de Fixia.
 
+El presupuesto del cliente (`service_requests.budget_amount`, GC-421), el precio de la postulación
+(`applications.proposed_amount`, GC-423), el valor de cada cotización (`quotations.amount`) y el precio contratado
+(`service_contracts.amount`) son datos distintos en lugares distintos: ninguno sobrescribe a otro.
+
 | Estado | Nombre (`statusName`) | Significado |
 |---|---|---|
 | `SENT` | Enviada | Enviada por el prestador seleccionado; espera respuesta del cliente |
@@ -283,6 +287,14 @@ SENT -> ACCEPTED | REJECTED | EXPIRED | SUPERSEDED
 - **Nueva versión.** Enviar otra cotización deja la `SENT` anterior en `SUPERSEDED` (o `EXPIRED` si ya venció), en la
   misma transacción y con la solicitud bloqueada (`FOR UPDATE`): siempre queda a lo sumo una esperando respuesta y
   dos envíos simultáneos no dejan dos vigentes.
+- **Versión (GC-427, migración V11).** Cada cotización lleva `revision` (1, 2, 3… por solicitud), asignada como el máximo
+  más uno con esa misma solicitud bloqueada, así que ningún número se repite ni se salta. La migración numeró las
+  existentes por antigüedad (`created_at` y, a igual instante, `id`). La columna es distinta de `version`, que es el candado
+  optimista de JPA y no se expone. Hay una restricción única `(service_request_id, revision)`.
+- **Versión vigente (`current`).** La respuesta trae `current: true` solo en la cotización que sigue `SENT` y no ha vencido,
+  la que el cliente aún puede aceptar o rechazar; una aceptada, rechazada, reemplazada o vencida no lo es. Los listados
+  (cliente por solicitud y prestador por solicitud) van de la versión más reciente a la más antigua. La contraoferta
+  estructurada del cliente queda fuera.
 - **Vencimiento.** La respuesta trae `expired: true` cuando la cotización sigue `SENT` pero su vigencia ya pasó; no se
   puede aceptar. Ningún proceso la pasa todavía a `EXPIRED` por sí solo.
 - **Aceptar o rechazar (GC-358).** Responde el cliente dueño de la solicitud (otro cliente o una cotización de otra solicitud
@@ -295,8 +307,8 @@ SENT -> ACCEPTED | REJECTED | EXPIRED | SUPERSEDED
 - **Aceptar contrata (GC-359).** Al aceptar, en la misma transacción, la solicitud pasa a `CONTRACTED` y se guarda la
   contratación con una copia de lo acordado (ver «Contratación»); si algo falla, la cotización sigue enviada. Rechazar no
   cambia la solicitud: el prestador puede enviar otra cotización.
-- El evento `cotizacion.enviada` (ADR-024, outbox) queda pendiente: el servicio todavía
-  no tiene tabla OUTBOX ni publicador.
+- El evento `cotizacion.enviada` se escribe en el Outbox al enviar (ver «Eventos de negocio»), con `revision` como campo
+  opcional.
 
 ## Contratación (GC-359)
 

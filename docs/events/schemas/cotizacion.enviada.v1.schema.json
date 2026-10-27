@@ -99,6 +99,11 @@
               }
             }
           }
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Número de versión de la cotización dentro de la solicitud (GC-427): 1 es la primera, 2 el primer ajuste. Opcional: los eventos anteriores a GC-427 no lo traen y los consumidores de la versión 1 original siguen siendo válidos."
         }
       }
     }

@@ -737,6 +737,11 @@ paths:
         Solo `ROLE_PROFESSIONAL`; el prestador sale del token. Debe ser el prestador seleccionado de una solicitud en
         `PROVIDER_SELECTED`. La cotización queda `SENT`; si había otra `SENT` en la solicitud, queda `SUPERSEDED` (o
         `EXPIRED` si ya había vencido). Todo ocurre con la solicitud bloqueada.
+
+        Cada envío es una versión nueva (GC-427): `revision` vale 1 en la primera cotización de la solicitud, 2 en el
+        primer ajuste, y así; se asigna con la solicitud bloqueada, así que dos envíos simultáneos nunca repiten número.
+        La versión vigente es la que trae `current: true` (la última, que sigue `SENT` y no ha vencido). Presupuesto del
+        cliente, precio de la postulación y valor de la cotización son datos distintos que no se sobrescriben.
       security:
         - bearerAuth: []
       requestBody:
@@ -1142,6 +1147,13 @@ components:
       properties:
         id: { type: string, format: uuid }
         serviceRequestId: { type: string, format: uuid }
+        revision:
+          type: integer
+          minimum: 1
+          example: 2
+          description: |
+            Número de versión dentro de la solicitud (GC-427): 1 es la primera cotización, 2 el primer ajuste. Sirve para
+            mostrar «versión 2». Las cotizaciones anteriores a GC-427 se numeraron por antigüedad en la migración.
         providerId: { type: string, format: uuid, description: Identificador del prestador en ms-users. }
         amount: { type: number, example: 150000.00 }
         currency: { type: string, enum: [COP] }
@@ -1152,6 +1164,12 @@ components:
         status: { $ref: '#/components/schemas/QuotationStatus' }
         statusName: { type: string, example: Enviada, description: Nombre del estado en español, para mostrar. }
         expired: { type: boolean, description: Sigue SENT pero su vigencia ya pasó; no se puede aceptar ni rechazar. }
+        current:
+          type: boolean
+          description: |
+            Es la versión vigente (GC-427): sigue `SENT` y no ha vencido, es decir, la que el cliente aún puede aceptar o
+            rechazar. Una aceptada, rechazada, reemplazada o vencida no es vigente. Como mucho una cotización por solicitud
+            es vigente.
         respondedAt: { type: string, format: date-time, nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }

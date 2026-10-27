@@ -92,7 +92,7 @@ public final class BusinessEvents {
 
     record QuotationSent(UUID quotationId, UUID serviceRequestId, UUID clientId, UUID providerId, Money price,
                          String scope, String conditions, Instant agreedAt, Instant validUntil, Instant sentAt,
-                         QuotationStatus status, List<ReplacedQuotation> replacedQuotations) {
+                         QuotationStatus status, List<ReplacedQuotation> replacedQuotations, Integer revision) {
     }
 
     record QuotationRejected(UUID quotationId, UUID serviceRequestId, UUID clientId, UUID providerId, Money price,
@@ -153,7 +153,8 @@ public final class BusinessEvents {
                 quotation.getScope(), quotation.getConditions(), quotation.getAgreedAt(), quotation.getValidUntil(),
                 quotation.getCreatedAt(), quotation.getStatus(),
                 replaced.stream().map(previous -> new ReplacedQuotation(previous.getId(), previous.getStatus()))
-                        .toList()));
+                        .toList(),
+                quotation.getRevision()));
     }
 
     /** El cliente rechazó la cotización. */
