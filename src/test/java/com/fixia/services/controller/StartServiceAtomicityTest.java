@@ -110,7 +110,7 @@ class StartServiceAtomicityTest {
         ServiceRequest saved = serviceRequestRepository.saveAndFlush(request);
         Quotation quotation = quotationRepository.saveAndFlush(Quotation.send(saved, PROVIDER,
                 new BigDecimal("90000"), CurrencyCode.COP, "Alcance", "Condiciones", now.plus(Duration.ofDays(3)),
-                now.plus(Duration.ofDays(1)), now));
+                now.plus(Duration.ofDays(1)), 1, now));
         mockMvc.perform(post("/api/services/requests/" + saved.getId() + "/quotations/" + quotation.getId()
                         + "/acceptance")
                 .with(jwt().jwt(token -> token.subject("usr_" + CLIENT))

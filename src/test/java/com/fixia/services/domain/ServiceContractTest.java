@@ -34,7 +34,7 @@ class ServiceContractTest {
     private static Quotation sentQuotation(ServiceRequest request, UUID provider) {
         Quotation quotation = Quotation.send(request, provider, new BigDecimal("350000"), CurrencyCode.COP,
                 "Cambio de tubería", "Incluye materiales; garantía de 3 meses", AGREED, NOW.plus(Duration.ofDays(1)),
-                NOW);
+                1, NOW);
         ReflectionTestUtils.setField(quotation, "id", UUID.randomUUID());
         return quotation;
     }

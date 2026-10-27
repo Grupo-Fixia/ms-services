@@ -112,7 +112,7 @@ class ContractControllerTest {
         Instant now = Instant.now();
         return quotationRepository.saveAndFlush(Quotation.send(request, PROVIDER, new BigDecimal("150000.50"),
                 CurrencyCode.COP, "Cambio de tubería del lavamanos", "Incluye materiales; pago al terminar",
-                now.plus(Duration.ofDays(3)), now.plus(Duration.ofDays(1)), now));
+                now.plus(Duration.ofDays(3)), now.plus(Duration.ofDays(1)), 1, now));
     }
 
     private static RequestPostProcessor client(UUID id) {
@@ -348,7 +348,7 @@ class ContractControllerTest {
         Instant now = Instant.now();
         Quotation otherQuotation = quotationRepository.saveAndFlush(Quotation.send(ofOther, OTHER_PROVIDER,
                 BigDecimal.TEN, CurrencyCode.COP, "x", "y", now.plus(Duration.ofDays(3)), now.plus(Duration.ofDays(1)),
-                now));
+                1, now));
         accept(CLIENT, ofOther.getId(), otherQuotation.getId()).andExpect(status().isOk());
 
         mockMvc.perform(get("/api/services/contracts").with(professional(PROVIDER)))
@@ -464,7 +464,7 @@ class ContractControllerTest {
 
         List<Integer> statuses = concurrently(tasks);
 
-        List<Quotation> all = quotationRepository.findByServiceRequestIdOrderByCreatedAtDesc(request.getId());
+        List<Quotation> all = quotationRepository.findByServiceRequestIdOrderByRevisionDesc(request.getId());
         long waiting = all.stream().filter(q -> q.getStatus() == QuotationStatus.SENT).count();
         if (contractRepository.count() == 1) {
             // Ganó la aceptación: contratada, sin ninguna cotización esperando respuesta y el envío rechazado.

@@ -2,6 +2,8 @@ package com.fixia.services.domain;
 
 import com.fixia.services.exception.InvalidQuotationTransitionException;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
@@ -34,7 +36,29 @@ class QuotationTest {
     private static Quotation send(ServiceRequest request, UUID provider, String amount) {
         return Quotation.send(request, provider, new BigDecimal(amount), CurrencyCode.COP,
                 "  Cambio de tubería y sellado  ", "  Incluye materiales; garantía de 3 meses  ", AGREED, VALID_UNTIL,
-                NOW);
+                1, NOW);
+    }
+
+    @Test
+    void laVersionSeGuardaTalComoSeAsigna() {
+        ServiceRequest request = selectedRequest();
+
+        Quotation second = Quotation.send(request, PROVIDER, new BigDecimal("350000"), CurrencyCode.COP, "Alcance",
+                "Condiciones", AGREED, VALID_UNTIL, 2, NOW);
+
+        assertThat(second.getRevision()).isEqualTo(2);
+        assertThat(send(request, PROVIDER, "350000").getRevision()).isEqualTo(1);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, -1, Integer.MIN_VALUE})
+    void laVersionDebeSerMayorQueCero(int revision) {
+        ServiceRequest request = selectedRequest();
+
+        assertThatThrownBy(() -> Quotation.send(request, PROVIDER, new BigDecimal("350000"), CurrencyCode.COP,
+                "Alcance", "Condiciones", AGREED, VALID_UNTIL, revision, NOW))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("La versión de la cotización debe ser mayor que cero");
     }
 
     @Test
@@ -95,9 +119,9 @@ class QuotationTest {
         assertThatThrownBy(() -> send(selectedRequest(), PROVIDER, "10000000000"))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> Quotation.send(selectedRequest(), PROVIDER, null, CurrencyCode.COP, "a", "b",
-                AGREED, VALID_UNTIL, NOW)).isInstanceOf(IllegalArgumentException.class);
+                AGREED, VALID_UNTIL, 1, NOW)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> Quotation.send(selectedRequest(), PROVIDER, BigDecimal.TEN, null, "a", "b",
-                AGREED, VALID_UNTIL, NOW)).isInstanceOf(IllegalArgumentException.class);
+                AGREED, VALID_UNTIL, 1, NOW)).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -105,11 +129,11 @@ class QuotationTest {
         String tooLong = "x".repeat(Quotation.MAX_TEXT_LENGTH + 1);
 
         assertThatThrownBy(() -> Quotation.send(selectedRequest(), PROVIDER, BigDecimal.TEN, CurrencyCode.COP, " ",
-                "b", AGREED, VALID_UNTIL, NOW)).hasMessage("El alcance es obligatorio");
+                "b", AGREED, VALID_UNTIL, 1, NOW)).hasMessage("El alcance es obligatorio");
         assertThatThrownBy(() -> Quotation.send(selectedRequest(), PROVIDER, BigDecimal.TEN, CurrencyCode.COP, "a",
-                null, AGREED, VALID_UNTIL, NOW)).hasMessage("Las condiciones son obligatorias");
+                null, AGREED, VALID_UNTIL, 1, NOW)).hasMessage("Las condiciones son obligatorias");
         assertThatThrownBy(() -> Quotation.send(selectedRequest(), PROVIDER, BigDecimal.TEN, CurrencyCode.COP,
-                tooLong, "b", AGREED, VALID_UNTIL, NOW)).isInstanceOf(IllegalArgumentException.class);
+                tooLong, "b", AGREED, VALID_UNTIL, 1, NOW)).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
@@ -117,17 +141,18 @@ class QuotationTest {
         ServiceRequest request = selectedRequest();
 
         assertThatThrownBy(() -> Quotation.send(request, PROVIDER, BigDecimal.TEN, CurrencyCode.COP, "a", "b",
-                null, VALID_UNTIL, NOW)).isInstanceOf(IllegalArgumentException.class);
+                null, VALID_UNTIL, 1, NOW)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> Quotation.send(request, PROVIDER, BigDecimal.TEN, CurrencyCode.COP, "a", "b",
-                NOW, NOW, NOW)).hasMessage("La fecha acordada debe ser posterior al envío");
+                NOW, NOW, 1, NOW)).hasMessage("La fecha acordada debe ser posterior al envío");
         assertThatThrownBy(() -> Quotation.send(request, PROVIDER, BigDecimal.TEN, CurrencyCode.COP, "a", "b",
-                AGREED, null, NOW)).isInstanceOf(IllegalArgumentException.class);
+                AGREED, null, 1, NOW)).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> Quotation.send(request, PROVIDER, BigDecimal.TEN, CurrencyCode.COP, "a", "b",
-                AGREED, NOW, NOW)).hasMessage("La vigencia debe ser posterior al envío");
+                AGREED, NOW, 1, NOW)).hasMessage("La vigencia debe ser posterior al envío");
         assertThatThrownBy(() -> Quotation.send(request, PROVIDER, BigDecimal.TEN, CurrencyCode.COP, "a", "b",
-                AGREED, AGREED.plusSeconds(1), NOW))
+                AGREED, AGREED.plusSeconds(1), 1, NOW))
                 .hasMessage("La vigencia no puede ser posterior a la fecha acordada");
-        assertThat(Quotation.send(request, PROVIDER, BigDecimal.TEN, CurrencyCode.COP, "a", "b", AGREED, AGREED, NOW)
+        assertThat(Quotation.send(request, PROVIDER, BigDecimal.TEN, CurrencyCode.COP, "a", "b", AGREED, AGREED,
+        1, NOW)
                 .getValidUntil()).isEqualTo(AGREED);
     }
 

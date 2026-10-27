@@ -3,6 +3,7 @@ package com.fixia.services.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fixia.services.client.TechnicianEligibilityClient;
+import com.fixia.services.client.TechnicianProfileClient;
 import com.fixia.services.domain.OutboxEvent;
 import com.fixia.services.domain.OutboxStatus;
 import com.fixia.services.repository.OutboxEventRepository;
@@ -70,6 +71,10 @@ class BusinessEventsFlowTest {
 
     @MockBean
     private TechnicianEligibilityClient eligibilityClient;
+
+    /** El listado de postulantes pide el perfil público a ms-users; aquí no se evalúa ese contenido. */
+    @MockBean
+    private TechnicianProfileClient profileClient;
 
     @BeforeEach
     void setUp() {
@@ -187,9 +192,44 @@ class BusinessEventsFlowTest {
         assertThat(selection.at("/data/selectedApplicationId").asText()).isEqualTo(anaApplication.toString());
         assertThat(selection.at("/data/selectedProposedPrice/amount").asText()).isEqualTo("98500.50");
         assertThat(selection.at("/data/rejectedApplicationIds/0").asText()).isEqualTo(carlosApplication.toString());
+        // La segunda cotización (después del rechazo de la primera) es la versión 2 de la solicitud (GC-427).
+        assertThat(envelope(events.get(4)).at("/data/revision").asInt()).isEqualTo(1);
+        assertThat(envelope(events.get(6)).at("/data/revision").asInt()).isEqualTo(2);
         JsonNode contracted = envelope(events.get(7));
         assertThat(contracted.at("/data/quotationId").asText()).isEqualTo(second.toString());
         assertThat(contracted.at("/data/price/amount").asText()).isEqualTo("105000.00");
+    }
+
+    private JsonNode getJson(String path, UUID userId, String role) throws Exception {
+        return objectMapper.readTree(mockMvc.perform(get(path).with(as(userId, role)))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+    }
+
+    @Test
+    void presupuestoPrecioDePostulacionCotizacionesYContratoSiguenSiendoDatosDistintos() throws Exception {
+        UUID request = publish();
+        UUID application = idOf(apply(ANA, request, "98500.50").andExpect(status().isCreated()));
+        send("/api/services/requests/" + request + "/applications/" + application + "/selection",
+                CLIENT, "ROLE_CLIENT", null).andExpect(status().isOk());
+        quote(ANA, request, "120000");
+        UUID adjusted = quote(ANA, request, "105000");
+        send("/api/services/requests/" + request + "/quotations/" + adjusted + "/acceptance", CLIENT, "ROLE_CLIENT",
+                null).andExpect(status().isOk());
+
+        // Presupuesto del cliente, precio de la postulación, cotizaciones y precio contratado: cada uno en su lugar.
+        assertThat(getJson("/api/services/requests/" + request, CLIENT, "ROLE_CLIENT").get("budgetAmount")
+                .decimalValue()).isEqualByComparingTo("200000");
+        assertThat(getJson("/api/services/requests/" + request + "/applications", CLIENT, "ROLE_CLIENT").get(0)
+                .findValue("proposedAmount").decimalValue()).isEqualByComparingTo("98500.50");
+        JsonNode quotations = getJson("/api/services/requests/" + request + "/quotations", CLIENT, "ROLE_CLIENT");
+        assertThat(quotations).hasSize(2);
+        assertThat(quotations.get(0).get("revision").asInt()).isEqualTo(2);
+        assertThat(quotations.get(0).get("amount").decimalValue()).isEqualByComparingTo("105000");
+        assertThat(quotations.get(1).get("revision").asInt()).isEqualTo(1);
+        assertThat(quotations.get(1).get("amount").decimalValue()).isEqualByComparingTo("120000");
+        assertThat(quotations.get(1).get("status").asText()).isEqualTo("SUPERSEDED");
+        assertThat(getJson("/api/services/requests/" + request + "/contract", CLIENT, "ROLE_CLIENT").get("amount")
+                .decimalValue()).isEqualByComparingTo("105000");
     }
 
     @Test

@@ -75,7 +75,7 @@ class ServiceContractRepositoryTest {
         ServiceRequest savedRequest = serviceRequestRepository.saveAndFlush(request);
         Quotation quotation = Quotation.send(savedRequest, provider, new BigDecimal("90000.50"), CurrencyCode.COP,
                 "Cambio de empaque", "Pago al terminar", now.plus(Duration.ofHours(2)), now.plus(Duration.ofHours(1)),
-                now);
+                1, now);
         quotation.accept(now);
         Quotation savedQuotation = quotationRepository.saveAndFlush(quotation);
         savedRequest.contract(now);
