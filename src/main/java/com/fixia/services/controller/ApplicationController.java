@@ -3,10 +3,12 @@ package com.fixia.services.controller;
 import com.fixia.services.domain.ServiceRequestApplication;
 import com.fixia.services.dto.ApplicationResponse;
 import com.fixia.services.dto.CreateApplicationRequest;
+import com.fixia.services.exception.InvalidApplicationException;
 import com.fixia.services.service.ApplicationService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,18 +34,37 @@ public class ApplicationController {
     /** El claim "sub" de los tokens de ms-users tiene la forma {@code usr_<uuid>}. */
     private static final String SUBJECT_PREFIX = "usr_";
 
+    /** Rol de las cuentas de empresa (GC-466). */
+    private static final String COMPANY_ROLE = "ROLE_COMPANY";
+
     private final ApplicationService service;
 
     public ApplicationController(ApplicationService service) {
         this.service = service;
     }
 
+    /**
+     * Un técnico independiente se postula con su precio; una empresa ({@code ROLE_COMPANY}, GC-468) además propone en
+     * {@code technicianId} a uno de sus técnicos asociados. Quien se postula sale siempre del token.
+     */
     @PostMapping
-    public ResponseEntity<ApplicationResponse> apply(@AuthenticationPrincipal Jwt jwt,
+    public ResponseEntity<ApplicationResponse> apply(@AuthenticationPrincipal Jwt jwt, Authentication authentication,
                                                      @Valid @RequestBody CreateApplicationRequest request) {
         UUID providerId = providerId(jwt);
-        ServiceRequestApplication created = service.apply(providerId, request.serviceRequestId(),
-                request.proposedAmount(), request.currency());
+        ServiceRequestApplication created;
+        if (isCompany(authentication)) {
+            if (request.technicianId() == null) {
+                throw new InvalidApplicationException("La empresa debe indicar el técnico que haría el trabajo");
+            }
+            created = service.applyAsCompany(providerId, request.technicianId(), request.serviceRequestId(),
+                    request.proposedAmount(), request.currency());
+        } else {
+            if (request.technicianId() != null) {
+                throw new InvalidApplicationException("Un técnico independiente no propone a otro técnico");
+            }
+            created = service.apply(providerId, request.serviceRequestId(), request.proposedAmount(),
+                    request.currency());
+        }
         URI location = ServletUriComponentsBuilder.fromCurrentRequest()
                 .path("/{id}").buildAndExpand(created.getId()).toUri();
         ApplicationService.ApplicationView view = service.getMine(providerId, created.getId());
@@ -61,6 +82,11 @@ public class ApplicationController {
     public ApplicationResponse get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
         ApplicationService.ApplicationView view = service.getMine(providerId(jwt), id);
         return ApplicationResponse.from(view.application(), view.request());
+    }
+
+    private static boolean isCompany(Authentication authentication) {
+        return authentication.getAuthorities().stream()
+                .anyMatch(authority -> COMPANY_ROLE.equals(authority.getAuthority()));
     }
 
     /**

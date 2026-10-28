@@ -3,6 +3,7 @@ package com.fixia.services.service;
 import com.fixia.services.domain.ApplicationStatus;
 import com.fixia.services.domain.ApproximateLocation;
 import com.fixia.services.domain.CurrencyCode;
+import com.fixia.services.domain.ProviderType;
 import com.fixia.services.domain.Quotation;
 import com.fixia.services.domain.QuotationStatus;
 import com.fixia.services.domain.ServiceCategory;
@@ -57,6 +58,10 @@ public final class BusinessEvents {
         public static Actor professional(UUID userId) {
             return new Actor(userId, "PROFESSIONAL");
         }
+
+        public static Actor company(UUID userId) {
+            return new Actor(userId, "COMPANY");
+        }
     }
 
     /** Importe como texto con dos decimales, para que ningún consumidor lo convierta a punto flotante. */
@@ -79,12 +84,14 @@ public final class BusinessEvents {
     }
 
     record ApplicationRegistered(UUID applicationId, UUID serviceRequestId, UUID providerId, ApplicationStatus status,
-                                 Money proposedPrice, Instant appliedAt) {
+                                 Money proposedPrice, Instant appliedAt, ProviderType providerType,
+                                 UUID technicianId) {
     }
 
     record ProviderSelected(UUID serviceRequestId, UUID clientId, UUID selectedApplicationId, UUID selectedProviderId,
                             Money selectedProposedPrice, List<UUID> rejectedApplicationIds, Instant selectedAt,
-                            ServiceRequestStatus status) {
+                            ServiceRequestStatus status, ProviderType selectedProviderType,
+                            UUID selectedTechnicianId) {
     }
 
     record ReplacedQuotation(UUID quotationId, QuotationStatus newStatus) {
@@ -135,7 +142,8 @@ public final class BusinessEvents {
     public static Event applicationRegistered(ServiceRequestApplication application) {
         return new Event(APPLICATION_REGISTERED, V1, new ApplicationRegistered(application.getId(),
                 application.getServiceRequestId(), application.getProviderId(), application.getStatus(),
-                Money.of(application.getProposedAmount(), application.getCurrency()), application.getCreatedAt()));
+                Money.of(application.getProposedAmount(), application.getCurrency()), application.getCreatedAt(),
+                application.getProviderType(), application.getTechnicianId()));
     }
 
     /** El cliente eligió prestador; las demás postulaciones quedaron rechazadas en la misma transacción. */
@@ -143,7 +151,8 @@ public final class BusinessEvents {
                                          List<ServiceRequestApplication> rejected, Instant selectedAt) {
         return new Event(PROVIDER_SELECTED, V1, new ProviderSelected(request.getId(), request.getClientId(),
                 chosen.getId(), chosen.getProviderId(), Money.of(chosen.getProposedAmount(), chosen.getCurrency()),
-                rejected.stream().map(ServiceRequestApplication::getId).toList(), selectedAt, request.getStatus()));
+                rejected.stream().map(ServiceRequestApplication::getId).toList(), selectedAt, request.getStatus(),
+                chosen.getProviderType(), chosen.getTechnicianId()));
     }
 
     /** El prestador envió una cotización; {@code replaced} son las enviadas que quedaron reemplazadas o vencidas. */

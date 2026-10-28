@@ -113,6 +113,13 @@ public class GlobalExceptionHandler {
         return problem;
     }
 
+    @ExceptionHandler(InvalidApplicationException.class)
+    public ProblemDetail handleInvalidApplication(InvalidApplicationException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Postulación inválida");
+        return problem;
+    }
+
     @ExceptionHandler(ApplicationNotFoundException.class)
     public ProblemDetail handleApplicationNotFound(ApplicationNotFoundException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
