@@ -74,15 +74,15 @@ devuelve hasta que la solicitud está contratada (`CONTRACTED`) o en curso (`IN_
 - **Falla cerrado.** Si ms-users no responde, 503 "Elegibilidad no verificable" y no se devuelve nada.
 - **Pendiente.** No hay total de resultados. Con volumen alto conviene un índice `(status, published_at, id)`.
 
-## Postulaciones (GC-342, GC-423)
+## Postulaciones (GC-342, GC-423, GC-468)
 
 | Método y ruta | Descripción |
 |---|---|
-| `POST /api/services/applications` | El técnico se postula a una solicitud con su precio propuesto (201 + `Location`) |
+| `POST /api/services/applications` | El técnico o la empresa se postula a una solicitud con su precio propuesto (201 + `Location`) |
 | `GET /api/services/applications` | Mis postulaciones, la más reciente primero |
 | `GET /api/services/applications/{id}` | Una de mis postulaciones; 404 si no existe o es de otro técnico |
 
-- Solo `ROLE_PROFESSIONAL`; el técnico sale del token. Tabla `applications` (migración V3), con
+- `ROLE_PROFESSIONAL` o `ROLE_COMPANY`; quien se postula sale del token. Tabla `applications` (migración V3), con
   estados `APPLIED -> SELECTED | REJECTED`.
 - La solicitud debe estar `PUBLISHED` y con el momento esperado por delante (si no, 409).
 - **Elegibilidad:** ms-users decide si el técnico puede atender la solicitud (categoría, zona de atención y
@@ -102,6 +102,18 @@ devuelve hasta que la solicitud está contratada (`CONTRACTED`) o en curso (`IN_
   la cotización. No se edita: volver a postularse con otro precio es el mismo 409 de duplicado. Columnas
   `proposed_amount` y `currency` (migración V6), en `NULL` para las postulaciones anteriores, que se devuelven sin
   precio en lugar de uno inventado. La restricción `ck_applications_proposed_price` exige ambos o ninguno.
+- **Postulación empresarial (GC-468, historia GC-465):** una cuenta `ROLE_COMPANY` se postula con
+  `{"serviceRequestId": "...", "technicianId": "...", "proposedAmount": 180000, "currency": "COP"}`, donde
+  `technicianId` es uno de sus técnicos asociados (el ejecutor propuesto). `provider_id` es el `users.id` de la cuenta
+  de la empresa (el `sub` del token) y `technician_id`, el del técnico; `provider_type` vale `INDEPENDENT` o `COMPANY`
+  (migración V12, con `ck_applications_provider_type`: técnico solo y siempre en las de empresa, distinto de la
+  empresa). Antes de guardar, ms-services confirma con ms-users que el técnico es de esa empresa
+  (`POST /internal/companies/technician-association`) y evalúa la elegibilidad **del técnico propuesto**. Respuestas:
+  400 si la empresa no envía `technicianId` o si un técnico independiente lo envía; 422 con `TECHNICIAN_NOT_ASSOCIATED`
+  si no es de la empresa, o con los motivos de elegibilidad; 409 si la empresa ya se postuló a esa solicitud, aunque
+  proponga otro técnico u otro precio (la misma unicidad de V4); 503 si ms-users no responde. Las respuestas traen
+  `providerType` y `technicianId`. Después de la selección no hay flujo empresarial: la empresa no puede cotizar (403
+  por rol) y el técnico propuesto tampoco (409, porque el prestador seleccionado es la empresa).
 
 ## Postulantes de una solicitud (GC-347, GC-425)
 
@@ -113,7 +125,8 @@ devuelve hasta que la solicitud está contratada (`CONTRACTED`) o en curso (`IN_
   un UUID, la respuesta es la misma (404 "No existe la solicitud indicada").
 - Lista en orden de llegada (la primera postulación primero); sin postulantes, `200` con `[]`. Sin paginación por
   ahora. Se puede consultar en cualquier estado de la solicitud, para ver también a quién se eligió.
-- Cada elemento trae `id`, `providerId`, `status` (`APPLIED`, `SELECTED` o `REJECTED`), `proposedAmount` y
+- Cada elemento trae `id`, `providerId`, `providerType`, `technicianId`, `status` (`APPLIED`, `SELECTED` o
+  `REJECTED`), `proposedAmount` y
   `currency` (el precio que propuso, GC-423; `null` en postulaciones anteriores), `createdAt` y `updatedAt`.
   No incluye datos de la solicitud ni ubicación.
 - **Perfil público del prestador (GC-425):** cada elemento trae `provider` con `displayName` (nombre e inicial del
@@ -123,6 +136,10 @@ devuelve hasta que la solicitud está contratada (`CONTRACTED`) o en curso (`IN_
   ms-users. Un prestador que ms-users ya no reconoce como técnico activo sale con `provider: null`; si ms-users no
   responde, 503 "Perfiles no disponibles" (no se muestran perfiles a medias ni inventados). Nunca se entregan correo,
   teléfono, documento ni ubicación del prestador.
+- **Postulaciones de empresa (GC-468):** `provider` es la empresa (solo `displayName` con su nombre comercial, que
+  ms-services pide en `POST /internal/companies/public-profiles`) y `executor` es el perfil público del técnico que
+  propone. En las de un técnico independiente, `executor` es `null`: el prestador es el mismo que ejecuta. Sin
+  empresas postuladas no se piden perfiles de empresa; si ms-users no los entrega, el mismo 503.
 
 ## Selección de prestador (GC-348)
 
