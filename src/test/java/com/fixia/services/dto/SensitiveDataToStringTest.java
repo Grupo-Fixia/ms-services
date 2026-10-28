@@ -29,7 +29,7 @@ class SensitiveDataToStringTest {
     @Test
     void elPrecioPropuestoDeLaPostulacionNoSeImprime() {
         CreateApplicationRequest request = new CreateApplicationRequest(UUID.randomUUID(),
-                new BigDecimal("187654.32"), CurrencyCode.COP);
+                new BigDecimal("187654.32"), CurrencyCode.COP, null);
 
         assertThat(request.toString()).doesNotContain("187654");
     }

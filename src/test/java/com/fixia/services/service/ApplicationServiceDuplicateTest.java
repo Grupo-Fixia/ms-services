@@ -48,7 +48,8 @@ class ApplicationServiceDuplicateTest {
     private final TechnicianEligibilityClient eligibility = mock(TechnicianEligibilityClient.class);
     private final TransactionTemplate transactions = mock(TransactionTemplate.class);
     private final BusinessEventRecorder events = mock(BusinessEventRecorder.class);
-    private final ApplicationService service = new ApplicationService(requests, applications, eligibility, events,
+    private final ApplicationService service = new ApplicationService(requests, applications, eligibility,
+            mock(com.fixia.services.client.CompanyClient.class), events,
             transactions, Clock.fixed(NOW, ZoneOffset.UTC));
 
     private ServiceRequest request;
