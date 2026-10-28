@@ -111,6 +111,46 @@ class ServiceRequestApplicationTest {
     }
 
     @Test
+    void unaEmpresaSePostulaConSuTecnicoComoEjecutor() {
+        UUID company = UUID.randomUUID();
+        UUID technician = UUID.randomUUID();
+
+        ServiceRequestApplication application = ServiceRequestApplication.submitForCompany(publishedRequest(),
+                company, technician, PRICE, CurrencyCode.COP, NOW);
+
+        assertThat(application.getProviderId()).isEqualTo(company);
+        assertThat(application.getProviderType()).isEqualTo(ProviderType.COMPANY);
+        assertThat(application.getTechnicianId()).isEqualTo(technician);
+        assertThat(application.getExecutorId()).isEqualTo(technician);
+        assertThat(application.getProposedAmount()).isEqualByComparingTo("150000");
+    }
+
+    @Test
+    void unIndependienteEsSuPropioEjecutor() {
+        ServiceRequestApplication application = ServiceRequestApplication.submit(publishedRequest(), PROVIDER,
+                PRICE, CurrencyCode.COP, NOW);
+
+        assertThat(application.getProviderType()).isEqualTo(ProviderType.INDEPENDENT);
+        assertThat(application.getTechnicianId()).isNull();
+        assertThat(application.getExecutorId()).isEqualTo(PROVIDER);
+    }
+
+    @Test
+    void laEmpresaDebeProponerUnTecnicoDistintoDeEllaMisma() {
+        UUID company = UUID.randomUUID();
+
+        assertThatThrownBy(() -> ServiceRequestApplication.submitForCompany(publishedRequest(), null,
+                UUID.randomUUID(), PRICE, CurrencyCode.COP, NOW)).hasMessage("La empresa es obligatoria");
+        assertThatThrownBy(() -> ServiceRequestApplication.submitForCompany(publishedRequest(), company, null,
+                PRICE, CurrencyCode.COP, NOW)).hasMessage("El técnico propuesto es obligatorio");
+        assertThatThrownBy(() -> ServiceRequestApplication.submitForCompany(publishedRequest(), company, company,
+                PRICE, CurrencyCode.COP, NOW)).hasMessage("La empresa no puede proponerse a sí misma como técnico");
+        assertThatThrownBy(() -> ServiceRequestApplication.submitForCompany(publishedRequest(), company,
+                UUID.randomUUID(), BigDecimal.ZERO, CurrencyCode.COP, NOW))
+                .hasMessage("El precio propuesto debe ser mayor que cero");
+    }
+
+    @Test
     void laSeleccionPasaLaPostulacionASeleccionadaORechazadaUnaSolaVez() {
         ServiceRequestApplication selected = ServiceRequestApplication.submit(publishedRequest(), PROVIDER,
                 PRICE, CurrencyCode.COP, NOW);

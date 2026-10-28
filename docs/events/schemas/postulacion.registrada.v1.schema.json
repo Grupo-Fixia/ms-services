@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://fixia.local/schemas/events/postulacion.registrada.v1.schema.json",
   "title": "postulacion.registrada (versión 1)",
-  "description": "Un técnico se postuló a una solicitud con su precio propuesto (RF-024, GC-423). Postularse no asigna el trabajo (RN-002).",
+  "description": "Un prestador se postuló a una solicitud con su precio propuesto (RF-024, GC-423): un técnico independiente o una empresa que propone a uno de sus técnicos asociados (GC-468). Postularse no asigna el trabajo (RN-002).",
   "allOf": [
     {
       "$ref": "https://fixia.local/schemas/events/envelope.v1.schema.json"
@@ -18,7 +18,10 @@
     "actor": {
       "properties": {
         "role": {
-          "const": "PROFESSIONAL"
+          "enum": [
+            "PROFESSIONAL",
+            "COMPANY"
+          ]
         }
       }
     },
@@ -51,6 +54,25 @@
         },
         "appliedAt": {
           "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/instant"
+        },
+        "providerType": {
+          "type": "string",
+          "enum": [
+            "INDEPENDENT",
+            "COMPANY"
+          ],
+          "description": "Opcional (GC-468). Ausente en eventos anteriores, que son de técnicos independientes."
+        },
+        "technicianId": {
+          "oneOf": [
+            {
+              "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opcional (GC-468). Técnico que la empresa propone como ejecutor; null si es independiente."
         }
       }
     }

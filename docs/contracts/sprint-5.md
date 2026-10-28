@@ -217,26 +217,29 @@ Pablo) confirma o ajusta lo siguiente.
   en los postulantes (GC-425), y `null` si el técnico no tiene evaluaciones. Promedio redondeado a un decimal.
 - Si la carga crece, se pasa a una proyección alimentada por `evaluacion.registrada`, idempotente por `eventId`.
 
-## 8. Empresa (🟡 GC-466 en ms-users, GC-468 en ms-services)
+## 8. Empresa (✅ GC-466 en ms-users, ✅ GC-468 en ms-services)
 
 Alcance del sprint (SRS V6 ALC-08): la empresa se identifica, consulta sus técnicos, se postula con un técnico propuesto
 y el cliente la puede seleccionar. **Cotización, contratación, ejecución y evaluación empresariales no entran.**
 
 ### 8.1 Identidad y asociación (ms-users, GC-466)
 
-- Rol nuevo `COMPANY` en el enum `Role`; el token lleva `ROLE_COMPANY`. La cuenta de la empresa es la del
-  administrador: su `users.id` es el id de la empresa en todo el sistema.
-- `company_profiles`: `user_id` (PK → users), `business_name`, `tax_id` (NIT), `created_at`.
-- `company_technicians`: `company_user_id`, `technician_user_id`, `status` (`ACTIVE`), `created_at`; único por par.
-  Las asociaciones de QA se siembran con datos controlados; no hay endpoint para vincular por id (RF-017).
-- `GET /api/users/companies/me/technicians` (`ROLE_COMPANY`): técnicos asociados activos con el mismo perfil público
-  de GC-425. Lista vacía si no hay.
-- Interna para ms-services: `GET /internal/companies/{companyUserId}/technicians/{technicianUserId}` →
-  `{associated, active}`.
-- ❓ ¿Un técnico puede estar asociado a varias empresas, o postularse por su cuenta además de por la empresa? Se propone
-  **una empresa por técnico** y permitirle seguir postulándose como independiente. Decide el PO con GC-466.
+Implementado por Tomás R. (V8 de ms-users), con dos ajustes frente a la propuesta inicial:
 
-### 8.2 Postulación y selección empresarial (ms-services, GC-468)
+- Rol `COMPANY`; el token lleva `ROLE_COMPANY`. La empresa tiene su propia fila en `companies` (`id`, `admin_user_id`
+  único, `name`, `nit`), pero **fuera de ms-users se identifica siempre por la cuenta de su administrador**
+  (`users.id`, el `sub` del token): ms-services no conoce `companies.id`.
+- `company_technicians` (`company_id`, `technician_user_id`), con **un técnico en una sola empresa**
+  (`uk_company_technicians_technician`). Sin endpoint para vincular por id (RF-017); los datos de QA salen del perfil
+  `seed-qa`.
+- `GET /api/users/companies/me` y `GET /api/users/companies/me/technicians` (`ROLE_COMPANY`).
+- Internas para ms-services: `POST /internal/companies/technician-association` con
+  `{companyAdminUserId, technicianUserId}` → `{associated}` (GC-466), y `POST /internal/companies/public-profiles` con
+  `{companyAdminUserIds}` → `{profiles: [{companyAdminUserId, name}]}` (GC-468).
+- ❓ Sigue abierto si un técnico asociado puede postularse además como independiente: hoy **sí puede** (nada lo
+  impide). Decide el PO.
+
+### 8.2 Postulación y selección empresarial (ms-services, GC-468, migración V12)
 
 - `applications` agrega `provider_type` (`INDEPENDENT` por defecto en las existentes, o `COMPANY`) y
   `technician_id` (obligatorio si es `COMPANY`, nulo si es independiente). La unicidad
@@ -247,14 +250,19 @@ y el cliente la puede seleccionar. **Cotización, contratación, ejecución y ev
   la empresa ya se postuló (aunque cambie técnico o precio); 503 si ms-users no responde.
 - La postulación y los postulantes devuelven `providerType` y `technicianId`; en los postulantes, `provider` es el perfil
   de la empresa (`displayName` = razón social) y `executor` el perfil público del técnico propuesto. Para eso la ruta
-  interna de perfiles públicos de ms-users (GC-425) acepta también ids de empresa y responde su razón social.
+  interna `POST /internal/companies/public-profiles` de ms-users devuelve el nombre comercial. En las de un técnico
+  independiente, `executor` es `null`.
 - La selección usa la **misma ruta** que un independiente. `selected_provider_id` guarda la empresa; el técnico
   ejecutor queda en la postulación `SELECTED` (no se duplica en `service_requests`).
 - Después de seleccionar una empresa, cotizar no está disponible (GC-468 paso 9): las rutas de cotización siguen siendo
   solo de `ROLE_PROFESSIONAL`, así que la empresa recibe 403, y el técnico propuesto recibe el 409 que ya existe ("No
   tienes una selección vigente"), porque el prestador seleccionado es la empresa y no él.
-- Eventos: `postulacion.registrada` y `prestador.seleccionado` ganan los opcionales `providerType` y `technicianId` /
-  `selectedTechnicianId` (siguen en versión 1).
+- Eventos: `postulacion.registrada` gana `providerType` y `technicianId`, y `prestador.seleccionado` gana
+  `selectedProviderType` y `selectedTechnicianId`, todos opcionales; el sobre admite `COMPANY` como rol del actor.
+  Siguen en versión 1 (esquemas actualizados en `docs/events/schemas`).
+- **Fuera de GC-468:** que la empresa **vea oportunidades**. `/api/services/opportunities` sigue siendo solo de técnicos
+  y se filtra por la elegibilidad de cada uno. ❓ Si la app empresarial lo necesita, definir con el PO qué oportunidades
+  ve una empresa (por ejemplo, las compatibles con alguno de sus técnicos).
 
 ## 9. Historial propio (🟡 GC-448, GC-449)
 

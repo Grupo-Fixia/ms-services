@@ -71,6 +71,25 @@
         },
         "status": {
           "const": "PROVIDER_SELECTED"
+        },
+        "selectedProviderType": {
+          "type": "string",
+          "enum": [
+            "INDEPENDENT",
+            "COMPANY"
+          ],
+          "description": "Opcional (GC-468). Si el elegido es un técnico independiente o una empresa."
+        },
+        "selectedTechnicianId": {
+          "oneOf": [
+            {
+              "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opcional (GC-468). Técnico ejecutor propuesto por la empresa elegida; null si es independiente."
         }
       }
     }

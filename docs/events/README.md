@@ -64,7 +64,7 @@ coinciden, manda el esquema.
 | `aggregate.sequence` | entero ≥ 1 | Posición del hecho en la historia de la solicitud (sección 8) |
 | `correlationId` | UUID | Id de la solicitud. Otros productores (pagos, evaluaciones) usarán el mismo valor para enlazar sus eventos con este servicio |
 | `actor.userId` | UUID o null | `users.id` de quien hizo la operación (el `sub` del token sin `usr_`); null si fue el sistema |
-| `actor.role` | `CLIENT`, `PROFESSIONAL` o `SYSTEM` | Rol con el que actuó |
+| `actor.role` | `CLIENT`, `PROFESSIONAL`, `COMPANY` o `SYSTEM` | Rol con el que actuó (`COMPANY` desde GC-468) |
 | `data` | objeto | Datos del hecho según el esquema de su tipo y versión |
 
 Los importes viajan como `{"amount": "150000.00", "currency": "COP"}`: el valor es **texto** con dos decimales, para

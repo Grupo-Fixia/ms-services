@@ -1,5 +1,6 @@
 package com.fixia.services.service;
 
+import com.fixia.services.client.CompanyClient;
 import com.fixia.services.client.TechnicianEligibilityClient;
 import com.fixia.services.domain.CurrencyCode;
 import com.fixia.services.domain.ServiceRequest;
@@ -33,20 +34,25 @@ public class ApplicationService {
     /** Restricción única (solicitud, técnico) de la migración V4. */
     static final String UNIQUE_CONSTRAINT = "uk_applications";
 
+    /** Motivo de no elegibilidad cuando el técnico propuesto no pertenece a la empresa (GC-468). */
+    static final String TECHNICIAN_NOT_ASSOCIATED = "TECHNICIAN_NOT_ASSOCIATED";
+
     private final ServiceRequestRepository serviceRequestRepository;
     private final ServiceRequestApplicationRepository applicationRepository;
     private final TechnicianEligibilityClient eligibilityClient;
+    private final CompanyClient companyClient;
     private final BusinessEventRecorder events;
     private final TransactionTemplate transactionTemplate;
     private final Clock clock;
 
     public ApplicationService(ServiceRequestRepository serviceRequestRepository,
                               ServiceRequestApplicationRepository applicationRepository,
-                              TechnicianEligibilityClient eligibilityClient, BusinessEventRecorder events,
-                              TransactionTemplate transactionTemplate, Clock clock) {
+                              TechnicianEligibilityClient eligibilityClient, CompanyClient companyClient,
+                              BusinessEventRecorder events, TransactionTemplate transactionTemplate, Clock clock) {
         this.serviceRequestRepository = serviceRequestRepository;
         this.applicationRepository = applicationRepository;
         this.eligibilityClient = eligibilityClient;
+        this.companyClient = companyClient;
         this.events = events;
         this.transactionTemplate = transactionTemplate;
         this.clock = clock;
@@ -70,12 +76,36 @@ public class ApplicationService {
      */
     public ServiceRequestApplication apply(UUID providerId, UUID serviceRequestId, BigDecimal proposedAmount,
                                            CurrencyCode currency) {
+        return register(serviceRequestId, providerId, null, proposedAmount, currency);
+    }
+
+    /**
+     * Postula a una empresa con uno de sus técnicos como ejecutor propuesto (GC-468, RF-024, RF-082). Mismas reglas
+     * que {@link #apply}, con dos diferencias: ms-users confirma primero que el técnico pertenece a esa empresa (si no,
+     * 422 con {@code TECHNICIAN_NOT_ASSOCIATED}), y la elegibilidad que se evalúa es la del técnico propuesto. Una
+     * empresa se postula una sola vez por solicitud (409), aunque proponga otro técnico u otro precio (RF-025).
+     *
+     * @param companyId users.id de la cuenta de la empresa (el {@code sub} del token)
+     */
+    public ServiceRequestApplication applyAsCompany(UUID companyId, UUID technicianId, UUID serviceRequestId,
+                                                    BigDecimal proposedAmount, CurrencyCode currency) {
+        return register(serviceRequestId, companyId, technicianId, proposedAmount, currency);
+    }
+
+    /** {@code technicianId} es {@code null} para un técnico independiente y obligatorio para una empresa. */
+    private ServiceRequestApplication register(UUID serviceRequestId, UUID providerId, UUID technicianId,
+                                               BigDecimal proposedAmount, CurrencyCode currency) {
+        boolean company = technicianId != null;
         ServiceRequest request = serviceRequestRepository.findById(serviceRequestId)
                 .orElseThrow(ServiceRequestNotFoundException::new);
         ServiceRequestApplication.requireOpen(request, clock.instant());
         rejectIfAlreadyApplied(serviceRequestId, providerId);
 
-        TechnicianEligibilityClient.Result eligibility = eligibilityClient.check(providerId, request);
+        if (company && !companyClient.isTechnicianAssociated(providerId, technicianId)) {
+            throw new TechnicianNotEligibleException(List.of(TECHNICIAN_NOT_ASSOCIATED));
+        }
+        TechnicianEligibilityClient.Result eligibility =
+                eligibilityClient.check(company ? technicianId : providerId, request);
         if (!eligibility.eligible()) {
             throw new TechnicianNotEligibleException(eligibility.reasons());
         }
@@ -83,8 +113,10 @@ public class ApplicationService {
         return transactionTemplate.execute(status -> {
             ServiceRequest locked = serviceRequestRepository.findByIdForUpdate(serviceRequestId)
                     .orElseThrow(ServiceRequestNotFoundException::new);
-            ServiceRequestApplication application = ServiceRequestApplication.submit(locked, providerId,
-                    proposedAmount, currency, clock.instant());
+            ServiceRequestApplication application = company
+                    ? ServiceRequestApplication.submitForCompany(locked, providerId, technicianId, proposedAmount,
+                    currency, clock.instant())
+                    : ServiceRequestApplication.submit(locked, providerId, proposedAmount, currency, clock.instant());
             rejectIfAlreadyApplied(serviceRequestId, providerId);
             ServiceRequestApplication saved;
             try {
@@ -96,7 +128,8 @@ public class ApplicationService {
                 throw e;
             }
             events.record(BusinessEvents.applicationRegistered(saved), serviceRequestId,
-                    BusinessEvents.Actor.professional(providerId), saved.getCreatedAt());
+                    company ? BusinessEvents.Actor.company(providerId) : BusinessEvents.Actor.professional(providerId),
+                    saved.getCreatedAt());
             return saved;
         });
     }

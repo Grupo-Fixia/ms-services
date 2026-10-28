@@ -196,9 +196,12 @@ paths:
 
   /api/services/applications:
     post:
-      summary: Postularse a una solicitud disponible con un precio propuesto (GC-342, GC-423)
+      summary: Postularse a una solicitud disponible con un precio propuesto (GC-342, GC-423, GC-468)
       description: |
-        Solo técnicos (`ROLE_PROFESSIONAL`). El técnico sale del token. El cuerpo lleva el precio que propone el
+        Técnicos (`ROLE_PROFESSIONAL`) y empresas (`ROLE_COMPANY`, GC-468). Quien se postula sale del token. La empresa
+        envía además `technicianId`, uno de sus técnicos asociados: ms-services confirma con ms-users la asociación y
+        evalúa la elegibilidad de ese técnico. Una empresa se postula una sola vez por solicitud, aunque cambie de
+        técnico o de precio (409). El cuerpo lleva el precio que propone el
         técnico (`proposedAmount` mayor que cero, hasta dos decimales, y `currency` COP); si falta o no es válido,
         400 sin consultar a ms-users. La solicitud debe estar `PUBLISHED` y con el
         momento esperado por delante. La elegibilidad (categoría, zona de atención y disponibilidad) la decide
@@ -236,7 +239,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '422':
-          description: El técnico no es elegible. `reasons` dice por qué (CATEGORY, ZONE, AVAILABILITY, ...).
+          description: |
+            El técnico (el que se postula o el propuesto por la empresa) no es elegible. `reasons` dice por qué
+            (CATEGORY, ZONE, AVAILABILITY, ... y `TECHNICIAN_NOT_ASSOCIATED` si no pertenece a la empresa).
           content:
             application/problem+json:
               schema:
@@ -1029,12 +1034,24 @@ components:
             Precio que propone el técnico (GC-423), hasta dos decimales y máximo 9999999999.99. Es distinto del
             presupuesto del cliente y del valor de la cotización. No se puede cambiar volviendo a postularse (409).
         currency: { type: string, enum: [COP] }
+        technicianId:
+          type: string
+          format: uuid
+          description: |
+            Solo empresas (GC-468), y obligatorio para ellas: el técnico asociado que haría el trabajo. Un técnico
+            independiente no lo envía (400).
 
     Application:
       type: object
       properties:
         id: { type: string, format: uuid }
         status: { $ref: '#/components/schemas/ApplicationStatus' }
+        providerType: { $ref: '#/components/schemas/ProviderType' }
+        technicianId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Técnico propuesto por la empresa (GC-468); `null` si se postuló un técnico independiente.
         proposedAmount:
           type: number
           nullable: true
@@ -1075,6 +1092,12 @@ components:
       properties:
         id: { type: string, format: uuid, description: Identificador de la postulación. }
         providerId: { type: string, format: uuid, description: Identificador del prestador en ms-users. }
+        providerType: { $ref: '#/components/schemas/ProviderType' }
+        technicianId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Técnico que propone la empresa (GC-468); `null` si es un técnico independiente.
         status: { $ref: '#/components/schemas/ApplicationStatus' }
         proposedAmount:
           type: number
@@ -1086,13 +1109,25 @@ components:
         updatedAt: { type: string, format: date-time }
         provider:
           $ref: '#/components/schemas/ProviderProfile'
+        executor:
+          allOf:
+            - $ref: '#/components/schemas/ProviderProfile'
+          nullable: true
+          description: |
+            Solo en postulaciones de empresa (GC-468): el perfil público del técnico propuesto. En las de un técnico
+            independiente es `null`, porque `provider` ya es quien ejecuta.
+
+    ProviderType:
+      type: string
+      enum: [INDEPENDENT, COMPANY]
+      description: Quién se postula (GC-468); las postulaciones anteriores son `INDEPENDENT`.
 
     ProviderProfile:
       type: object
       nullable: true
       description: |
         Perfil público del prestador (GC-425), tal como lo entrega ms-users. `null` si ms-users ya no lo reconoce como
-        técnico activo. Los campos que el técnico no ha llenado llegan en `null` (las especialidades, como `[]`).
+        técnico activo. Para una empresa (GC-468) solo trae `displayName` con su nombre comercial. Los campos que el técnico no ha llenado llegan en `null` (las especialidades, como `[]`).
       properties:
         displayName: { type: string, example: Carlos G., description: Nombre e inicial del apellido. }
         verificationStatus: { type: string, example: PENDING, description: Estado de verificación del técnico. }
