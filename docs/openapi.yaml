@@ -15,8 +15,8 @@ info:
     y, en cada petición, consulta a ms-users si el token fue revocado por un cierre de sesión. Si ms-users no
     responde, la petición se rechaza con 401 (el servicio falla cerrado).
 
-    Privacidad: la dirección exacta se guarda pero no se devuelve mientras la solicitud no esté
-    `CONTRACTED`. La ubicación aproximada devuelve las coordenadas redondeadas a dos decimales (~1 km).
+    Privacidad: la dirección exacta se guarda pero no se devuelve mientras la solicitud no esté contratada
+    (`CONTRACTED`); desde ahí se entrega también en `IN_PROGRESS`, `TECHNICIAN_FINISHED` y `CLOSED`. La ubicación aproximada devuelve las coordenadas redondeadas a dos decimales (~1 km).
 servers:
   - url: http://localhost
     description: Traefik (docker compose)
@@ -30,6 +30,9 @@ paths:
       description: |
         Crea una solicitud en estado `PUBLISHED` para el cliente autenticado. El cliente sale del token:
         un `clientId` en el cuerpo se ignora. Solo rol `ROLE_CLIENT`.
+
+        Lleva un presupuesto orientativo (GC-421): un valor único en COP, obligatorio y mayor que cero. Es solo una
+        guía para el prestador; no es un pago ni un límite, y es distinto del precio propuesto al postularse.
       security:
         - bearerAuth: []
       requestBody:
@@ -193,9 +196,12 @@ paths:
 
   /api/services/applications:
     post:
-      summary: Postularse a una solicitud disponible con un precio propuesto (GC-342, GC-423)
+      summary: Postularse a una solicitud disponible con un precio propuesto (GC-342, GC-423, GC-468)
       description: |
-        Solo técnicos (`ROLE_PROFESSIONAL`). El técnico sale del token. El cuerpo lleva el precio que propone el
+        Técnicos (`ROLE_PROFESSIONAL`) y empresas (`ROLE_COMPANY`, GC-468). Quien se postula sale del token. La empresa
+        envía además `technicianId`, uno de sus técnicos asociados: ms-services confirma con ms-users la asociación y
+        evalúa la elegibilidad de ese técnico. Una empresa se postula una sola vez por solicitud, aunque cambie de
+        técnico o de precio (409). El cuerpo lleva el precio que propone el
         técnico (`proposedAmount` mayor que cero, hasta dos decimales, y `currency` COP); si falta o no es válido,
         400 sin consultar a ms-users. La solicitud debe estar `PUBLISHED` y con el
         momento esperado por delante. La elegibilidad (categoría, zona de atención y disponibilidad) la decide
@@ -233,7 +239,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
         '422':
-          description: El técnico no es elegible. `reasons` dice por qué (CATEGORY, ZONE, AVAILABILITY, ...).
+          description: |
+            El técnico (el que se postula o el propuesto por la empresa) no es elegible. `reasons` dice por qué
+            (CATEGORY, ZONE, AVAILABILITY, ... y `TECHNICIAN_NOT_ASSOCIATED` si no pertenece a la empresa).
           content:
             application/problem+json:
               schema:
@@ -556,6 +564,177 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/services/contracts/{contractId}/start:
+    post:
+      summary: Iniciar la ejecución del servicio contratado (GC-437)
+      description: |
+        Solo `ROLE_PROFESSIONAL`, y solo el prestador de esa contratación. Sin cuerpo: el prestador sale del token y la
+        contratación, de la ruta. La solicitud pasa de `CONTRACTED` a `IN_PROGRESS`; en la misma transacción se anota la
+        transición en el historial y se registra el evento `servicio.iniciado`, o no ocurre nada.
+
+        Repetir el inicio sobre un servicio que ya está en curso responde 200 con el estado actual y **no** cambia nada ni
+        publica otro evento (dos inicios simultáneos dejan uno solo). Si la contratación no existe, es de otro prestador o
+        el identificador no es un UUID, la respuesta es la misma 404 "Contratación no encontrada". Desde cualquier otro
+        estado que no sea `CONTRACTED` o `IN_PROGRESS`, 409. La dirección exacta sigue entregándose al prestador y al
+        cliente mientras el servicio está en curso.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: "La contratación con el servicio en curso (`serviceStatus: IN_PROGRESS`) y su historial."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: El servicio no está en un estado desde el que se pueda iniciar (título "Transición de estado no permitida").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/services/contracts/{contractId}/finish:
+    post:
+      summary: Declarar finalizado el servicio, como técnico (GC-441)
+      description: |
+        Solo `ROLE_PROFESSIONAL`, y solo el prestador de esa contratación. Sin cuerpo y sin evidencias obligatorias (son
+        opcionales y llegan con GC-439). El servicio pasa de `IN_PROGRESS` a `TECHNICIAN_FINISHED`; **no** queda cerrado:
+        el cierre lo confirma el cliente o lo objeta. Cambio de estado, historial y evento `servicio.finalizado` en una sola
+        transacción.
+
+        Repetirlo sobre un servicio ya finalizado responde 200 con el estado actual, sin cambio ni evento nuevo. Si la
+        contratación no existe, es de otro prestador o el id no es un UUID, la misma 404 "Contratación no encontrada".
+        Sin haber iniciado el servicio, o ya cerrado, 409.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: "La contratación con el servicio finalizado (`serviceStatus: TECHNICIAN_FINISHED`) y su historial."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: El servicio no está en curso (título "Transición de estado no permitida").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/services/requests/{id}/closure:
+    post:
+      summary: Confirmar el cierre del servicio, como cliente (GC-441)
+      description: |
+        Solo `ROLE_CLIENT`, y solo el dueño de la solicitud. Sin cuerpo. El servicio pasa de `TECHNICIAN_FINISHED` a `CLOSED`,
+        definitivo, y habilita la evaluación posterior. Cambio de estado, historial y evento `servicio.cerrado` en una sola
+        transacción. No hay cierre automático por silencio.
+
+        Confirmar un servicio ya cerrado responde 200 con el estado actual, sin duplicar nada (cierre doble). Una solicitud
+        ajena o inexistente da la misma 404 "Solicitud no encontrada". Si el técnico aún no lo declaró finalizado, 409.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: "La contratación con el servicio cerrado (`serviceStatus: CLOSED`) y su historial."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: El técnico aún no declaró finalizado el servicio (título "Transición de estado no permitida").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+  /api/services/requests/{id}/closure-objection:
+    post:
+      summary: Objetar el cierre del servicio, como cliente (GC-441)
+      description: |
+        Solo `ROLE_CLIENT`, y solo el dueño de la solicitud. El cliente no confirma el cierre: el servicio pasa de
+        `TECHNICIAN_FINISHED` a `IN_PROGRESS` con el motivo registrado en el historial, que ven el cliente y el técnico. No es
+        un cierre satisfactorio ni una disputa formal (fuera del sprint). El evento `servicio.cierre_objetado` **no** lleva el
+        texto del motivo. Después el técnico puede declarar finalizado otra vez y el cliente cerrar.
+
+        Repetir la misma objeción sobre el servicio ya devuelto a `IN_PROGRESS` responde 200 sin duplicar. Un servicio ya
+        cerrado no se puede objetar (409), ni tampoco desde cualquier otro estado distinto de `TECHNICIAN_FINISHED`, ni con
+        un motivo diferente al último.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ClosureObjection'
+      responses:
+        '200':
+          description: "La contratación con el servicio de vuelta en curso (`serviceStatus: IN_PROGRESS`) y su historial."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Contract'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: El servicio no está finalizado por el técnico, o ya está cerrado (título "Transición de estado no permitida").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
   /api/services/quotations:
     post:
       summary: Crear y enviar una cotización (GC-354)
@@ -563,6 +742,11 @@ paths:
         Solo `ROLE_PROFESSIONAL`; el prestador sale del token. Debe ser el prestador seleccionado de una solicitud en
         `PROVIDER_SELECTED`. La cotización queda `SENT`; si había otra `SENT` en la solicitud, queda `SUPERSEDED` (o
         `EXPIRED` si ya había vencido). Todo ocurre con la solicitud bloqueada.
+
+        Cada envío es una versión nueva (GC-427): `revision` vale 1 en la primera cotización de la solicitud, 2 en el
+        primer ajuste, y así; se asigna con la solicitud bloqueada, así que dos envíos simultáneos nunca repiten número.
+        La versión vigente es la que trae `current: true` (la última, que sigue `SENT` y no ha vencido). Presupuesto del
+        cliente, precio de la postulación y valor de la cotización son datos distintos que no se sobrescriben.
       security:
         - bearerAuth: []
       requestBody:
@@ -730,14 +914,18 @@ components:
 
     ServiceRequestStatus:
       type: string
-      enum: [PUBLISHED, PROVIDER_SELECTED, CONTRACTED, CANCELLED, EXPIRED]
+      enum: [PUBLISHED, PROVIDER_SELECTED, CONTRACTED, IN_PROGRESS, TECHNICIAN_FINISHED, CLOSED, CANCELLED, EXPIRED]
       description: |
-        `PUBLISHED` → `PROVIDER_SELECTED` | `CANCELLED` | `EXPIRED`; `PROVIDER_SELECTED` → `CONTRACTED` | `CANCELLED`.
-        `CONTRACTED`, `CANCELLED` y `EXPIRED` son terminales.
+        `PUBLISHED` → `PROVIDER_SELECTED` | `CANCELLED` | `EXPIRED`; `PROVIDER_SELECTED` → `CONTRACTED` | `CANCELLED`;
+        `CONTRACTED` → `IN_PROGRESS` (el prestador contratado inicia el servicio, GC-437);
+        `IN_PROGRESS` → `TECHNICIAN_FINISHED` (el técnico declara que terminó, GC-441);
+        `TECHNICIAN_FINISHED` → `CLOSED` (el cliente confirma el cierre) | `IN_PROGRESS` (el cliente lo objeta).
+        `CLOSED`, `CANCELLED` y `EXPIRED` son terminales: un servicio cerrado no se reabre. La dirección exacta se
+        entrega desde `CONTRACTED`, también una vez cerrado.
 
     CreateServiceRequest:
       type: object
-      required: [category, description, approximateLocation, expectedAt]
+      required: [category, description, approximateLocation, expectedAt, budgetAmount, budgetCurrency]
       properties:
         category: { $ref: '#/components/schemas/ServiceCategory' }
         description: { type: string, maxLength: 2000, example: Fuga de agua en el baño }
@@ -753,7 +941,7 @@ components:
         exactLocation:
           type: object
           required: [address]
-          description: Opcional. Se guarda protegida y no se devuelve hasta que la solicitud esté `CONTRACTED`.
+          description: Opcional. Se guarda protegida y no se devuelve hasta que la solicitud esté contratada (`CONTRACTED`, `IN_PROGRESS`, `TECHNICIAN_FINISHED` o `CLOSED`).
           properties:
             address: { type: string, maxLength: 255, example: 'Calle 10 # 5-20, apto 301' }
             latitude: { type: number, format: double, minimum: -90, maximum: 90 }
@@ -763,6 +951,21 @@ components:
           format: date-time
           description: Momento esperado del servicio; debe ser posterior a la publicación.
           example: '2026-10-20T15:00:00Z'
+        budgetAmount:
+          type: number
+          minimum: 0
+          exclusiveMinimum: true
+          maximum: 9999999999.99
+          multipleOf: 0.01
+          description: |
+            Presupuesto orientativo (GC-421): un valor único, obligatorio y mayor que cero, con máximo dos decimales.
+            Solo guía al prestador; no es un pago ni un límite. Es distinto del precio propuesto (`proposedAmount`).
+          example: 200000
+        budgetCurrency:
+          type: string
+          enum: [COP]
+          description: Moneda del presupuesto. Por ahora solo pesos colombianos.
+          example: COP
         photoKeys:
           type: array
           maxItems: 5
@@ -787,12 +990,22 @@ components:
             longitude: { type: number, format: double, nullable: true }
         exactLocation:
           type: object
-          description: Solo presente cuando la solicitud está `CONTRACTED` y el cliente indicó una dirección.
+          description: Solo presente cuando la solicitud está contratada (`CONTRACTED`, `IN_PROGRESS`, `TECHNICIAN_FINISHED` o `CLOSED`) y el cliente indicó una dirección.
           properties:
             address: { type: string }
             latitude: { type: number, format: double, nullable: true }
             longitude: { type: number, format: double, nullable: true }
         expectedAt: { type: string, format: date-time }
+        budgetAmount:
+          type: number
+          nullable: true
+          description: Presupuesto orientativo con dos decimales (por ejemplo `200000.00`). `null` en las solicitudes anteriores a GC-421.
+          example: 200000.00
+        budgetCurrency:
+          type: string
+          nullable: true
+          enum: [COP]
+          description: Moneda del presupuesto; `null` si la solicitud no tiene presupuesto.
         photoKeys:
           type: array
           items: { type: string }
@@ -821,12 +1034,24 @@ components:
             Precio que propone el técnico (GC-423), hasta dos decimales y máximo 9999999999.99. Es distinto del
             presupuesto del cliente y del valor de la cotización. No se puede cambiar volviendo a postularse (409).
         currency: { type: string, enum: [COP] }
+        technicianId:
+          type: string
+          format: uuid
+          description: |
+            Solo empresas (GC-468), y obligatorio para ellas: el técnico asociado que haría el trabajo. Un técnico
+            independiente no lo envía (400).
 
     Application:
       type: object
       properties:
         id: { type: string, format: uuid }
         status: { $ref: '#/components/schemas/ApplicationStatus' }
+        providerType: { $ref: '#/components/schemas/ProviderType' }
+        technicianId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Técnico propuesto por la empresa (GC-468); `null` si se postuló un técnico independiente.
         proposedAmount:
           type: number
           nullable: true
@@ -867,6 +1092,12 @@ components:
       properties:
         id: { type: string, format: uuid, description: Identificador de la postulación. }
         providerId: { type: string, format: uuid, description: Identificador del prestador en ms-users. }
+        providerType: { $ref: '#/components/schemas/ProviderType' }
+        technicianId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Técnico que propone la empresa (GC-468); `null` si es un técnico independiente.
         status: { $ref: '#/components/schemas/ApplicationStatus' }
         proposedAmount:
           type: number
@@ -878,13 +1109,25 @@ components:
         updatedAt: { type: string, format: date-time }
         provider:
           $ref: '#/components/schemas/ProviderProfile'
+        executor:
+          allOf:
+            - $ref: '#/components/schemas/ProviderProfile'
+          nullable: true
+          description: |
+            Solo en postulaciones de empresa (GC-468): el perfil público del técnico propuesto. En las de un técnico
+            independiente es `null`, porque `provider` ya es quien ejecuta.
+
+    ProviderType:
+      type: string
+      enum: [INDEPENDENT, COMPANY]
+      description: Quién se postula (GC-468); las postulaciones anteriores son `INDEPENDENT`.
 
     ProviderProfile:
       type: object
       nullable: true
       description: |
         Perfil público del prestador (GC-425), tal como lo entrega ms-users. `null` si ms-users ya no lo reconoce como
-        técnico activo. Los campos que el técnico no ha llenado llegan en `null` (las especialidades, como `[]`).
+        técnico activo. Para una empresa (GC-468) solo trae `displayName` con su nombre comercial. Los campos que el técnico no ha llenado llegan en `null` (las especialidades, como `[]`).
       properties:
         displayName: { type: string, example: Carlos G., description: Nombre e inicial del apellido. }
         verificationStatus: { type: string, example: PENDING, description: Estado de verificación del técnico. }
@@ -907,6 +1150,12 @@ components:
         latitude: { type: number, nullable: true }
         longitude: { type: number, nullable: true }
         expectedAt: { type: string, format: date-time }
+        budgetAmount:
+          type: number
+          nullable: true
+          description: Presupuesto orientativo del cliente (GC-421), solo una guía para decidir si se postula; no es un precio. `null` en las solicitudes anteriores a él.
+          example: 200000.00
+        budgetCurrency: { type: string, nullable: true, enum: [COP] }
         publishedAt: { type: string, format: date-time }
 
     QuotationStatus:
@@ -933,6 +1182,13 @@ components:
       properties:
         id: { type: string, format: uuid }
         serviceRequestId: { type: string, format: uuid }
+        revision:
+          type: integer
+          minimum: 1
+          example: 2
+          description: |
+            Número de versión dentro de la solicitud (GC-427): 1 es la primera cotización, 2 el primer ajuste. Sirve para
+            mostrar «versión 2». Las cotizaciones anteriores a GC-427 se numeraron por antigüedad en la migración.
         providerId: { type: string, format: uuid, description: Identificador del prestador en ms-users. }
         amount: { type: number, example: 150000.00 }
         currency: { type: string, enum: [COP] }
@@ -943,6 +1199,12 @@ components:
         status: { $ref: '#/components/schemas/QuotationStatus' }
         statusName: { type: string, example: Enviada, description: Nombre del estado en español, para mostrar. }
         expired: { type: boolean, description: Sigue SENT pero su vigencia ya pasó; no se puede aceptar ni rechazar. }
+        current:
+          type: boolean
+          description: |
+            Es la versión vigente (GC-427): sigue `SENT` y no ha vencido, es decir, la que el cliente aún puede aceptar o
+            rechazar. Una aceptada, rechazada, reemplazada o vencida no es vigente. Como mucho una cotización por solicitud
+            es vigente.
         respondedAt: { type: string, format: date-time, nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
@@ -964,6 +1226,19 @@ components:
         conditions: { type: string }
         agreedAt: { type: string, format: date-time, description: Fecha acordada para el servicio. }
         contractedAt: { type: string, format: date-time }
+        serviceStatus:
+          allOf:
+            - $ref: '#/components/schemas/ServiceRequestStatus'
+          description: Estado actual del servicio (GC-437); es el mismo `serviceRequest.status`. Lo ven igual el cliente y el prestador.
+        timeline:
+          type: array
+          description: |
+            Historial de transiciones del servicio, del más antiguo al más reciente (GC-437). Se devuelve al consultar una
+            contratación (`GET /requests/{id}/contract`, `GET /contracts/{id}` y `POST /contracts/{id}/start`), no en el
+            listado `GET /contracts`. Las transiciones anteriores a la tabla de historial no se reconstruyen: un servicio
+            antiguo puede traerlo vacío o parcial.
+          items:
+            $ref: '#/components/schemas/Transition'
         serviceRequest:
           type: object
           properties:
@@ -979,12 +1254,38 @@ components:
                 longitude: { type: number, format: double, nullable: true }
             exactLocation:
               type: object
-              description: Presente porque la solicitud ya está `CONTRACTED`, si el cliente indicó una dirección.
+              description: Presente porque la solicitud ya está contratada (`CONTRACTED`, `IN_PROGRESS`, `TECHNICIAN_FINISHED` o `CLOSED`), si el cliente indicó una dirección.
               properties:
                 address: { type: string }
                 latitude: { type: number, format: double, nullable: true }
                 longitude: { type: number, format: double, nullable: true }
             expectedAt: { type: string, format: date-time }
+
+    ClosureObjection:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Motivo de la objeción (GC-441). Queda en el historial de los participantes; no viaja en el evento.
+          example: El grifo sigue goteando después del arreglo
+
+    Transition:
+      type: object
+      description: Un cambio de estado del servicio (GC-437, GC-441).
+      properties:
+        fromStatus:
+          allOf:
+            - $ref: '#/components/schemas/ServiceRequestStatus'
+          nullable: true
+          description: Estado anterior; `null` en la publicación, que no tiene origen.
+        toStatus: { $ref: '#/components/schemas/ServiceRequestStatus' }
+        actorId: { type: string, format: uuid, description: "`users.id` de quien hizo el cambio; ausente si lo hizo el sistema." }
+        actorRole: { type: string, enum: [CLIENT, PROFESSIONAL, SYSTEM] }
+        reason: { type: string, maxLength: 500, description: Motivo, cuando la transición lo requiere; ausente si no hay. }
+        occurredAt: { type: string, format: date-time }
 
     NotEligibleProblem:
       allOf:

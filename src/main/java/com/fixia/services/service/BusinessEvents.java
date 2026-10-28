@@ -3,6 +3,7 @@ package com.fixia.services.service;
 import com.fixia.services.domain.ApplicationStatus;
 import com.fixia.services.domain.ApproximateLocation;
 import com.fixia.services.domain.CurrencyCode;
+import com.fixia.services.domain.ProviderType;
 import com.fixia.services.domain.Quotation;
 import com.fixia.services.domain.QuotationStatus;
 import com.fixia.services.domain.ServiceCategory;
@@ -33,6 +34,10 @@ public final class BusinessEvents {
     public static final String QUOTATION_SENT = "cotizacion.enviada";
     public static final String QUOTATION_REJECTED = "cotizacion.rechazada";
     public static final String SERVICE_CONTRACTED = "servicio.contratado";
+    public static final String SERVICE_STARTED = "servicio.iniciado";
+    public static final String SERVICE_FINISHED = "servicio.finalizado";
+    public static final String CLOSURE_OBJECTED = "servicio.cierre_objetado";
+    public static final String SERVICE_CLOSED = "servicio.cerrado";
 
     private static final short V1 = 1;
 
@@ -53,6 +58,10 @@ public final class BusinessEvents {
         public static Actor professional(UUID userId) {
             return new Actor(userId, "PROFESSIONAL");
         }
+
+        public static Actor company(UUID userId) {
+            return new Actor(userId, "COMPANY");
+        }
     }
 
     /** Importe como texto con dos decimales, para que ningún consumidor lo convierta a punto flotante. */
@@ -71,16 +80,18 @@ public final class BusinessEvents {
 
     record RequestPublished(UUID serviceRequestId, UUID clientId, ServiceCategory category, String description,
                             Location approximateLocation, Instant expectedAt, Instant publishedAt,
-                            ServiceRequestStatus status, int photoCount) {
+                            ServiceRequestStatus status, int photoCount, Money budget) {
     }
 
     record ApplicationRegistered(UUID applicationId, UUID serviceRequestId, UUID providerId, ApplicationStatus status,
-                                 Money proposedPrice, Instant appliedAt) {
+                                 Money proposedPrice, Instant appliedAt, ProviderType providerType,
+                                 UUID technicianId) {
     }
 
     record ProviderSelected(UUID serviceRequestId, UUID clientId, UUID selectedApplicationId, UUID selectedProviderId,
                             Money selectedProposedPrice, List<UUID> rejectedApplicationIds, Instant selectedAt,
-                            ServiceRequestStatus status) {
+                            ServiceRequestStatus status, ProviderType selectedProviderType,
+                            UUID selectedTechnicianId) {
     }
 
     record ReplacedQuotation(UUID quotationId, QuotationStatus newStatus) {
@@ -88,7 +99,7 @@ public final class BusinessEvents {
 
     record QuotationSent(UUID quotationId, UUID serviceRequestId, UUID clientId, UUID providerId, Money price,
                          String scope, String conditions, Instant agreedAt, Instant validUntil, Instant sentAt,
-                         QuotationStatus status, List<ReplacedQuotation> replacedQuotations) {
+                         QuotationStatus status, List<ReplacedQuotation> replacedQuotations, Integer revision) {
     }
 
     record QuotationRejected(UUID quotationId, UUID serviceRequestId, UUID clientId, UUID providerId, Money price,
@@ -100,21 +111,39 @@ public final class BusinessEvents {
                              ServiceRequestStatus status) {
     }
 
-    /** El cliente publicó la solicitud. Solo ubicación aproximada y el número de fotos. */
+    record ServiceStarted(UUID contractId, UUID serviceRequestId, UUID clientId, UUID providerId, Instant startedAt,
+                          ServiceRequestStatus status) {
+    }
+
+    record ServiceFinished(UUID contractId, UUID serviceRequestId, UUID clientId, UUID providerId, Instant finishedAt,
+                           ServiceRequestStatus status) {
+    }
+
+    /** Sin el motivo de la objeción: puede traer datos personales y vive solo en el historial de los participantes. */
+    record ClosureObjected(UUID contractId, UUID serviceRequestId, UUID clientId, UUID providerId, Instant objectedAt,
+                           ServiceRequestStatus status) {
+    }
+
+    record ServiceClosed(UUID contractId, UUID serviceRequestId, UUID clientId, UUID providerId, Instant closedAt,
+                         ServiceRequestStatus status) {
+    }
+
+    /** El cliente publicó la solicitud. Solo ubicación aproximada, el número de fotos y su presupuesto orientativo. */
     public static Event requestPublished(ServiceRequest request) {
         ApproximateLocation location = request.getApproximateLocation();
         return new Event(REQUEST_PUBLISHED, V1, new RequestPublished(request.getId(), request.getClientId(),
                 request.getCategory(), request.getDescription(),
                 new Location(location.city(), location.zone(), location.latitude(), location.longitude()),
                 request.getExpectedAt(), request.getPublishedAt(), request.getStatus(),
-                request.getPhotoKeys().size()));
+                request.getPhotoKeys().size(), Money.of(request.getBudgetAmount(), request.getBudgetCurrency())));
     }
 
     /** Un técnico se postuló con su precio propuesto. */
     public static Event applicationRegistered(ServiceRequestApplication application) {
         return new Event(APPLICATION_REGISTERED, V1, new ApplicationRegistered(application.getId(),
                 application.getServiceRequestId(), application.getProviderId(), application.getStatus(),
-                Money.of(application.getProposedAmount(), application.getCurrency()), application.getCreatedAt()));
+                Money.of(application.getProposedAmount(), application.getCurrency()), application.getCreatedAt(),
+                application.getProviderType(), application.getTechnicianId()));
     }
 
     /** El cliente eligió prestador; las demás postulaciones quedaron rechazadas en la misma transacción. */
@@ -122,7 +151,8 @@ public final class BusinessEvents {
                                          List<ServiceRequestApplication> rejected, Instant selectedAt) {
         return new Event(PROVIDER_SELECTED, V1, new ProviderSelected(request.getId(), request.getClientId(),
                 chosen.getId(), chosen.getProviderId(), Money.of(chosen.getProposedAmount(), chosen.getCurrency()),
-                rejected.stream().map(ServiceRequestApplication::getId).toList(), selectedAt, request.getStatus()));
+                rejected.stream().map(ServiceRequestApplication::getId).toList(), selectedAt, request.getStatus(),
+                chosen.getProviderType(), chosen.getTechnicianId()));
     }
 
     /** El prestador envió una cotización; {@code replaced} son las enviadas que quedaron reemplazadas o vencidas. */
@@ -132,7 +162,8 @@ public final class BusinessEvents {
                 quotation.getScope(), quotation.getConditions(), quotation.getAgreedAt(), quotation.getValidUntil(),
                 quotation.getCreatedAt(), quotation.getStatus(),
                 replaced.stream().map(previous -> new ReplacedQuotation(previous.getId(), previous.getStatus()))
-                        .toList()));
+                        .toList(),
+                quotation.getRevision()));
     }
 
     /** El cliente rechazó la cotización. */
@@ -150,5 +181,33 @@ public final class BusinessEvents {
                 contract.getProviderId(), Money.of(contract.getAmount(), contract.getCurrency()), contract.getScope(),
                 contract.getConditions(), contract.getAgreedAt(), contract.getContractedAt(),
                 ServiceRequestStatus.CONTRACTED));
+    }
+
+    /** El prestador contratado inició el servicio (GC-437): la solicitud pasó de CONTRACTED a IN_PROGRESS. */
+    public static Event serviceStarted(ServiceContract contract, Instant startedAt) {
+        return new Event(SERVICE_STARTED, V1, new ServiceStarted(contract.getId(), contract.getServiceRequestId(),
+                contract.getClientId(), contract.getProviderId(), startedAt, ServiceRequestStatus.IN_PROGRESS));
+    }
+
+    /**
+     * El prestador declaró que terminó (GC-441): {@code IN_PROGRESS -> TECHNICIAN_FINISHED}. Sin {@code evidenceCount}:
+     * las evidencias llegan con GC-439, que lo agregará como campo opcional.
+     */
+    public static Event serviceFinished(ServiceContract contract, Instant finishedAt) {
+        return new Event(SERVICE_FINISHED, V1, new ServiceFinished(contract.getId(), contract.getServiceRequestId(),
+                contract.getClientId(), contract.getProviderId(), finishedAt,
+                ServiceRequestStatus.TECHNICIAN_FINISHED));
+    }
+
+    /** El cliente objetó el cierre (GC-441): el servicio volvió a {@code IN_PROGRESS}. No lleva el texto del motivo. */
+    public static Event closureObjected(ServiceContract contract, Instant objectedAt) {
+        return new Event(CLOSURE_OBJECTED, V1, new ClosureObjected(contract.getId(), contract.getServiceRequestId(),
+                contract.getClientId(), contract.getProviderId(), objectedAt, ServiceRequestStatus.IN_PROGRESS));
+    }
+
+    /** El cliente confirmó el cierre (GC-441): {@code TECHNICIAN_FINISHED -> CLOSED}, definitivo. */
+    public static Event serviceClosed(ServiceContract contract, Instant closedAt) {
+        return new Event(SERVICE_CLOSED, V1, new ServiceClosed(contract.getId(), contract.getServiceRequestId(),
+                contract.getClientId(), contract.getProviderId(), closedAt, ServiceRequestStatus.CLOSED));
     }
 }

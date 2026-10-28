@@ -11,12 +11,17 @@ import java.util.UUID;
 /**
  * Cotización tal como la ven el prestador que la envió y el cliente dueño de la solicitud.
  *
+ * @param revision   número de versión dentro de la solicitud (GC-427): 1 es la primera cotización, 2 el primer ajuste. Sirve
+ *                   para mostrar «versión 2» sin calcularla
  * @param statusName nombre del estado en español, para mostrar ({@code status} es el código que se compara)
  * @param expired    la cotización sigue {@code SENT} pero su vigencia ya pasó: no se puede aceptar (RF-033)
+ * @param current    es la versión vigente: sigue {@code SENT} y no ha vencido, es decir, la que el cliente aún puede
+ *                   aceptar o rechazar. Una aceptada, rechazada, reemplazada o vencida no es vigente
  */
 public record QuotationResponse(
         UUID id,
         UUID serviceRequestId,
+        int revision,
         UUID providerId,
         BigDecimal amount,
         CurrencyCode currency,
@@ -27,15 +32,18 @@ public record QuotationResponse(
         QuotationStatus status,
         String statusName,
         boolean expired,
+        boolean current,
         Instant respondedAt,
         Instant createdAt,
         Instant updatedAt
 ) {
 
     public static QuotationResponse from(Quotation quotation, Instant now) {
+        boolean expired = quotation.isExpiredAt(now);
         return new QuotationResponse(
                 quotation.getId(),
                 quotation.getServiceRequestId(),
+                quotation.getRevision(),
                 quotation.getProviderId(),
                 quotation.getAmount(),
                 quotation.getCurrency(),
@@ -45,7 +53,8 @@ public record QuotationResponse(
                 quotation.getValidUntil(),
                 quotation.getStatus(),
                 quotation.getStatus().getDisplayName(),
-                quotation.isExpiredAt(now),
+                expired,
+                quotation.getStatus() == QuotationStatus.SENT && !expired,
                 quotation.getRespondedAt(),
                 quotation.getCreatedAt(),
                 quotation.getUpdatedAt());

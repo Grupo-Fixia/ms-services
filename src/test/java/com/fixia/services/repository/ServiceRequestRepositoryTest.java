@@ -68,7 +68,46 @@ class ServiceRequestRepositoryTest {
         Instant now = now();
         return repository.saveAndFlush(ServiceRequest.publish(clientId, ServiceCategory.PLUMBING,
                 "Fuga de agua en el baño", new ApproximateLocation("Bogotá", "Chapinero", 4.6533, -74.0836),
-                exact, now.plus(Duration.ofDays(1)), photos, now));
+                exact, now.plus(Duration.ofDays(1)), new BigDecimal("200000"), CurrencyCode.COP, photos, now));
+    }
+
+    @Test
+    void guardaElPresupuestoConDosDecimalesYLoRecuperaIgual() {
+        Instant now = now();
+        ServiceRequest saved = repository.saveAndFlush(ServiceRequest.publish(UUID.randomUUID(),
+                ServiceCategory.PLUMBING, "Fuga de agua", new ApproximateLocation("Bogotá", "Chapinero"), null,
+                now.plus(Duration.ofDays(1)), new BigDecimal("98500.5"), CurrencyCode.COP, List.of(), now));
+
+        ServiceRequest found = repository.findById(saved.getId()).orElseThrow();
+
+        assertThat(found.getBudgetAmount()).isEqualByComparingTo("98500.50");
+        assertThat(found.getBudgetCurrency()).isEqualTo(CurrencyCode.COP);
+        assertThat(jdbcTemplate.queryForObject("SELECT budget_amount FROM service_requests WHERE id = ?",
+                String.class, saved.getId())).isEqualTo("98500.50");
+    }
+
+    @Test
+    void laBaseAdmiteUnaSolicitudHistoricaSinPresupuestoPeroNoUnoIncompletoOInvalido() {
+        UUID id = save(UUID.randomUUID(), List.of(), null).getId();
+
+        jdbcTemplate.update("UPDATE service_requests SET budget_amount = NULL, budget_currency = NULL WHERE id = ?",
+                id);
+        ServiceRequest historic = repository.findById(id).orElseThrow();
+        assertThat(historic.getBudgetAmount()).isNull();
+        assertThat(historic.getBudgetCurrency()).isNull();
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE service_requests SET budget_amount = 1000 WHERE id = ?", id))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE service_requests SET budget_currency = 'COP' WHERE id = ?", id))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE service_requests SET budget_amount = 0, budget_currency = 'COP' WHERE id = ?", id))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE service_requests SET budget_amount = 1000, budget_currency = 'USD' WHERE id = ?", id))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
@@ -139,9 +178,11 @@ class ServiceRequestRepositoryTest {
         Instant base = now();
         ServiceRequest older = repository.saveAndFlush(ServiceRequest.publish(client, ServiceCategory.PAINTING,
                 "Pintar sala", new ApproximateLocation("Cali", "Granada"), null, base.plus(Duration.ofDays(2)),
+                new BigDecimal("200000"), CurrencyCode.COP,
                 List.of("requests/x.jpg"), base.minusSeconds(60)));
         ServiceRequest newer = repository.saveAndFlush(ServiceRequest.publish(client, ServiceCategory.CARPENTRY,
                 "Arreglar puerta", new ApproximateLocation("Cali", "Granada"), null, base.plus(Duration.ofDays(2)),
+                new BigDecimal("200000"), CurrencyCode.COP,
                 List.of(), base));
         save(UUID.randomUUID(), List.of(), null);
 
@@ -184,6 +225,43 @@ class ServiceRequestRepositoryTest {
     }
 
     @Test
+    void laBaseConoceElEstadoEnCursoYExigeSuPrestador() {
+        UUID id = save(UUID.randomUUID(), List.of(), null).getId();
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE service_requests SET status = 'IN_PROGRESS' WHERE id = ?", id))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThat(jdbcTemplate.update("UPDATE service_requests SET status = 'IN_PROGRESS', "
+                + "selected_provider_id = ? WHERE id = ?", PROVIDER, id)).isEqualTo(1);
+        assertThat(repository.findById(id).orElseThrow().getStatus()).isEqualTo(ServiceRequestStatus.IN_PROGRESS);
+    }
+
+    @Test
+    void laBaseConoceLaFinalizacionYElCierreYExigeSuPrestador() {
+        UUID id = save(UUID.randomUUID(), List.of(), null).getId();
+
+        for (String stage : List.of("TECHNICIAN_FINISHED", "CLOSED")) {
+            jdbcTemplate.update("UPDATE service_requests SET status = 'PUBLISHED', selected_provider_id = NULL "
+                    + "WHERE id = ?", id);
+            assertThatThrownBy(() -> jdbcTemplate.update(
+                    "UPDATE service_requests SET status = ? WHERE id = ?", stage, id))
+                    .isInstanceOf(DataIntegrityViolationException.class);
+            assertThat(jdbcTemplate.update("UPDATE service_requests SET status = ?, selected_provider_id = ? "
+                    + "WHERE id = ?", stage, PROVIDER, id)).isEqualTo(1);
+            assertThat(repository.findById(id).orElseThrow().getStatus().name()).isEqualTo(stage);
+        }
+    }
+
+    @Test
+    void laBaseSigueRechazandoUnEstadoInexistente() {
+        UUID id = save(UUID.randomUUID(), List.of(), null).getId();
+
+        assertThatThrownBy(() -> jdbcTemplate.update(
+                "UPDATE service_requests SET status = 'REOPENED', selected_provider_id = ? WHERE id = ?", PROVIDER, id))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
     void laBaseRechazaDosFotosEnLaMismaPosicion() {
         UUID id = save(UUID.randomUUID(), List.of("requests/a.jpg"), null).getId();
 
@@ -201,7 +279,8 @@ class ServiceRequestRepositoryTest {
 
     private ServiceRequest published(Instant publishedAt, Instant expectedAt) {
         return repository.saveAndFlush(ServiceRequest.publish(UUID.randomUUID(), ServiceCategory.PLUMBING,
-                "Fuga de agua", new ApproximateLocation("Bogotá", "Chapinero"), null, expectedAt, List.of(),
+                "Fuga de agua", new ApproximateLocation("Bogotá", "Chapinero"), null, expectedAt,
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(),
                 publishedAt));
     }
 

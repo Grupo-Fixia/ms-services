@@ -113,6 +113,13 @@ public class GlobalExceptionHandler {
         return problem;
     }
 
+    @ExceptionHandler(InvalidApplicationException.class)
+    public ProblemDetail handleInvalidApplication(InvalidApplicationException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Postulación inválida");
+        return problem;
+    }
+
     @ExceptionHandler(ApplicationNotFoundException.class)
     public ProblemDetail handleApplicationNotFound(ApplicationNotFoundException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
@@ -164,6 +171,17 @@ public class GlobalExceptionHandler {
     public ProblemDetail handleInvalidQuotationTransition(InvalidQuotationTransitionException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
         problem.setTitle("Cambio de estado no permitido");
+        return problem;
+    }
+
+    /**
+     * La solicitud no está en un estado desde el que se pueda hacer lo pedido (por ejemplo, iniciar un servicio que no
+     * está contratado). Sin este manejador sería un 500.
+     */
+    @ExceptionHandler(InvalidStatusTransitionException.class)
+    public ProblemDetail handleInvalidStatusTransition(InvalidStatusTransitionException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Transición de estado no permitida");
         return problem;
     }
 

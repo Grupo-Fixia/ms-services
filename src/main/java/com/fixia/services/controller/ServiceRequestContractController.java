@@ -32,7 +32,7 @@ public class ServiceRequestContractController {
     @GetMapping
     public ContractResponse get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
         ContractService.ContractView view = service.getForClient(clientId(jwt), id);
-        return ContractResponse.from(view.contract(), view.request());
+        return ContractResponse.from(view.contract(), view.request(), view.timeline());
     }
 
     /**

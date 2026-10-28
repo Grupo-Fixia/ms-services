@@ -90,7 +90,8 @@ class QuotationResponseControllerTest {
     private ServiceRequest selectedRequest(UUID clientId, UUID providerId) {
         Instant now = Instant.now();
         ServiceRequest request = ServiceRequest.publish(clientId, ServiceCategory.PLUMBING, "Fuga de agua en el baño",
-                new ApproximateLocation("Bogotá", "Chapinero"), null, now.plus(Duration.ofDays(5)), List.of(), now);
+                new ApproximateLocation("Bogotá", "Chapinero"), null, now.plus(Duration.ofDays(5)),
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), now);
         request.selectProvider(providerId, now);
         return serviceRequestRepository.saveAndFlush(request);
     }
@@ -99,7 +100,7 @@ class QuotationResponseControllerTest {
     private Quotation sent(ServiceRequest request, UUID providerId, Instant sentAt) {
         return quotationRepository.saveAndFlush(Quotation.send(request, providerId, new BigDecimal("90000"),
                 CurrencyCode.COP, "Cambio de empaque", "Pago al terminar", sentAt.plus(Duration.ofHours(2)),
-                sentAt.plus(Duration.ofHours(1)), sentAt));
+                sentAt.plus(Duration.ofHours(1)), 1, sentAt));
     }
 
     private Quotation sent(ServiceRequest request) {
@@ -180,6 +181,9 @@ class QuotationResponseControllerTest {
                 .andExpect(jsonPath("$.status").value("ACCEPTED"))
                 .andExpect(jsonPath("$.statusName").value("Aceptada"))
                 .andExpect(jsonPath("$.expired").value(false))
+                // La aceptada es la contratada, no una vigente a la espera de respuesta.
+                .andExpect(jsonPath("$.revision").value(1))
+                .andExpect(jsonPath("$.current").value(false))
                 .andExpect(jsonPath("$.respondedAt").isNotEmpty());
 
         Quotation saved = stored(quotation.getId());
@@ -269,7 +273,7 @@ class QuotationResponseControllerTest {
         // Caso defensivo: aunque el envío ya lo impide, una segunda enviada no debe poder aceptarse.
         Quotation another = quotationRepository.saveAndFlush(Quotation.send(request, PROVIDER, new BigDecimal("5000"),
                 CurrencyCode.COP, "Otra", "Otra", Instant.now().plus(Duration.ofHours(3)),
-                Instant.now().plus(Duration.ofHours(2)), Instant.now()));
+                Instant.now().plus(Duration.ofHours(2)), 2, Instant.now()));
 
         accept(CLIENT, request.getId(), another.getId())
                 .andExpect(status().isConflict())
@@ -288,11 +292,17 @@ class QuotationResponseControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("REJECTED"))
                 .andExpect(jsonPath("$.statusName").value("Rechazada"))
-                .andExpect(jsonPath("$.respondedAt").isNotEmpty());
+                .andExpect(jsonPath("$.respondedAt").isNotEmpty())
+                // Rechazada: conserva su versión y ya no es la vigente.
+                .andExpect(jsonPath("$.revision").value(1))
+                .andExpect(jsonPath("$.current").value(false));
 
         assertThat(serviceRequestRepository.findById(request.getId()).orElseThrow().getStatus())
                 .isEqualTo(ServiceRequestStatus.PROVIDER_SELECTED);
-        send(PROVIDER, request.getId()).andExpect(status().isCreated());
+        // El ajuste posterior continúa la numeración y es la nueva versión vigente.
+        send(PROVIDER, request.getId()).andExpect(status().isCreated())
+                .andExpect(jsonPath("$.revision").value(2))
+                .andExpect(jsonPath("$.current").value(true));
         assertThat(stored(quotation.getId()).getStatus()).isEqualTo(QuotationStatus.REJECTED);
     }
 
@@ -487,7 +497,7 @@ class QuotationResponseControllerTest {
 
         List<Integer> statuses = concurrently(tasks);
 
-        List<Quotation> all = quotationRepository.findByServiceRequestIdOrderByCreatedAtDesc(request.getId());
+        List<Quotation> all = quotationRepository.findByServiceRequestIdOrderByRevisionDesc(request.getId());
         long accepted = all.stream().filter(q -> q.getStatus() == QuotationStatus.ACCEPTED).count();
         long waiting = all.stream().filter(q -> q.getStatus() == QuotationStatus.SENT).count();
         if (accepted == 1) {

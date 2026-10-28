@@ -68,7 +68,7 @@ public class ServiceRequestController {
     @GetMapping("/{id}/applications")
     public List<ApplicantResponse> applicants(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
         return applicantService.list(clientId(jwt), id).stream()
-                .map(view -> ApplicantResponse.from(view.application(), view.profile()))
+                .map(view -> ApplicantResponse.from(view.application(), view.executor(), view.company()))
                 .toList();
     }
 

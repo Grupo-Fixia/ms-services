@@ -3,6 +3,7 @@ package com.fixia.services.dto;
 import com.fixia.services.domain.ApplicationStatus;
 import com.fixia.services.domain.ApproximateLocation;
 import com.fixia.services.domain.CurrencyCode;
+import com.fixia.services.domain.ProviderType;
 import com.fixia.services.domain.ServiceCategory;
 import com.fixia.services.domain.ServiceRequest;
 import com.fixia.services.domain.ServiceRequestApplication;
@@ -20,6 +21,8 @@ import java.util.UUID;
 public record ApplicationResponse(
         UUID id,
         ApplicationStatus status,
+        ProviderType providerType,
+        UUID technicianId,
         BigDecimal proposedAmount,
         CurrencyCode currency,
         Instant createdAt,
@@ -41,6 +44,8 @@ public record ApplicationResponse(
         return new ApplicationResponse(
                 application.getId(),
                 application.getStatus(),
+                application.getProviderType(),
+                application.getTechnicianId(),
                 application.getProposedAmount(),
                 application.getCurrency(),
                 application.getCreatedAt(),

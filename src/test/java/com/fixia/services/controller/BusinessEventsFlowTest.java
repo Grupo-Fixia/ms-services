@@ -3,6 +3,7 @@ package com.fixia.services.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fixia.services.client.TechnicianEligibilityClient;
+import com.fixia.services.client.TechnicianProfileClient;
 import com.fixia.services.domain.OutboxEvent;
 import com.fixia.services.domain.OutboxStatus;
 import com.fixia.services.repository.OutboxEventRepository;
@@ -22,6 +23,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -33,6 +35,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -69,6 +72,10 @@ class BusinessEventsFlowTest {
     @MockBean
     private TechnicianEligibilityClient eligibilityClient;
 
+    /** El listado de postulantes pide el perfil público a ms-users; aquí no se evalúa ese contenido. */
+    @MockBean
+    private TechnicianProfileClient profileClient;
+
     @BeforeEach
     void setUp() {
         outboxRepository.deleteAllInBatch();
@@ -104,6 +111,8 @@ class BusinessEventsFlowTest {
                 "latitude", 4.6533, "longitude", -74.0836));
         body.put("exactLocation", Map.of("address", EXACT_ADDRESS, "latitude", 4.7110, "longitude", -74.0721));
         body.put("expectedAt", Instant.now().plus(Duration.ofDays(2)).toString());
+        body.put("budgetAmount", 200000);
+        body.put("budgetCurrency", "COP");
         body.put("photoKeys", List.of("requests/a.jpg", "requests/b.jpg"));
         return idOf(send("/api/services/requests", CLIENT, "ROLE_CLIENT", body).andExpect(status().isCreated()));
     }
@@ -183,9 +192,121 @@ class BusinessEventsFlowTest {
         assertThat(selection.at("/data/selectedApplicationId").asText()).isEqualTo(anaApplication.toString());
         assertThat(selection.at("/data/selectedProposedPrice/amount").asText()).isEqualTo("98500.50");
         assertThat(selection.at("/data/rejectedApplicationIds/0").asText()).isEqualTo(carlosApplication.toString());
+        // La segunda cotización (después del rechazo de la primera) es la versión 2 de la solicitud (GC-427).
+        assertThat(envelope(events.get(4)).at("/data/revision").asInt()).isEqualTo(1);
+        assertThat(envelope(events.get(6)).at("/data/revision").asInt()).isEqualTo(2);
         JsonNode contracted = envelope(events.get(7));
         assertThat(contracted.at("/data/quotationId").asText()).isEqualTo(second.toString());
         assertThat(contracted.at("/data/price/amount").asText()).isEqualTo("105000.00");
+    }
+
+    private JsonNode getJson(String path, UUID userId, String role) throws Exception {
+        return objectMapper.readTree(mockMvc.perform(get(path).with(as(userId, role)))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+    }
+
+    @Test
+    void presupuestoPrecioDePostulacionCotizacionesYContratoSiguenSiendoDatosDistintos() throws Exception {
+        UUID request = publish();
+        UUID application = idOf(apply(ANA, request, "98500.50").andExpect(status().isCreated()));
+        send("/api/services/requests/" + request + "/applications/" + application + "/selection",
+                CLIENT, "ROLE_CLIENT", null).andExpect(status().isOk());
+        quote(ANA, request, "120000");
+        UUID adjusted = quote(ANA, request, "105000");
+        send("/api/services/requests/" + request + "/quotations/" + adjusted + "/acceptance", CLIENT, "ROLE_CLIENT",
+                null).andExpect(status().isOk());
+
+        // Presupuesto del cliente, precio de la postulación, cotizaciones y precio contratado: cada uno en su lugar.
+        assertThat(getJson("/api/services/requests/" + request, CLIENT, "ROLE_CLIENT").get("budgetAmount")
+                .decimalValue()).isEqualByComparingTo("200000");
+        assertThat(getJson("/api/services/requests/" + request + "/applications", CLIENT, "ROLE_CLIENT").get(0)
+                .findValue("proposedAmount").decimalValue()).isEqualByComparingTo("98500.50");
+        JsonNode quotations = getJson("/api/services/requests/" + request + "/quotations", CLIENT, "ROLE_CLIENT");
+        assertThat(quotations).hasSize(2);
+        assertThat(quotations.get(0).get("revision").asInt()).isEqualTo(2);
+        assertThat(quotations.get(0).get("amount").decimalValue()).isEqualByComparingTo("105000");
+        assertThat(quotations.get(1).get("revision").asInt()).isEqualTo(1);
+        assertThat(quotations.get(1).get("amount").decimalValue()).isEqualByComparingTo("120000");
+        assertThat(quotations.get(1).get("status").asText()).isEqualTo("SUPERSEDED");
+        assertThat(getJson("/api/services/requests/" + request + "/contract", CLIENT, "ROLE_CLIENT").get("amount")
+                .decimalValue()).isEqualByComparingTo("105000");
+    }
+
+    @Test
+    void iniciarElServicioDejaSuEventoYElHistorialCompletoDelFlujoReal() throws Exception {
+        UUID request = publish();
+        UUID application = idOf(apply(ANA, request, "98500.50").andExpect(status().isCreated()));
+        send("/api/services/requests/" + request + "/applications/" + application + "/selection",
+                CLIENT, "ROLE_CLIENT", null).andExpect(status().isOk());
+        UUID quotation = quote(ANA, request, "105000");
+        send("/api/services/requests/" + request + "/quotations/" + quotation + "/acceptance", CLIENT, "ROLE_CLIENT",
+                null).andExpect(status().isOk());
+        JsonNode contract = objectMapper.readTree(mockMvc.perform(
+                        get("/api/services/requests/" + request + "/contract").with(as(CLIENT, "ROLE_CLIENT")))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        String start = "/api/services/contracts/" + contract.get("id").asText() + "/start";
+
+        send(start, ANA, "ROLE_PROFESSIONAL", null).andExpect(status().isOk());
+        send(start, ANA, "ROLE_PROFESSIONAL", null).andExpect(status().isOk());
+
+        List<OutboxEvent> events = history(request);
+        assertThat(events).extracting(OutboxEvent::getEventType).containsExactly(
+                "solicitud.publicada", "postulacion.registrada", "prestador.seleccionado", "cotizacion.enviada",
+                "servicio.contratado", "servicio.iniciado");
+        assertThat(EventContract.violations(envelope(events.get(5)))).isEmpty();
+
+        JsonNode timeline = objectMapper.readTree(mockMvc.perform(
+                        get("/api/services/requests/" + request + "/contract").with(as(CLIENT, "ROLE_CLIENT")))
+                .andReturn().getResponse().getContentAsString()).get("timeline");
+        assertThat(timeline).hasSize(4);
+        assertThat(timeline.findValuesAsText("toStatus"))
+                .containsExactly("PUBLISHED", "PROVIDER_SELECTED", "CONTRACTED", "IN_PROGRESS");
+        assertThat(timeline.get(0).get("fromStatus").isNull()).isTrue();
+        assertThat(timeline.findValuesAsText("actorRole"))
+                .containsExactly("CLIENT", "CLIENT", "CLIENT", "PROFESSIONAL");
+    }
+
+    @Test
+    void elCicloCompletoConObjecionDejaTodosLosEventosEnOrdenYValidosSinElMotivo() throws Exception {
+        String reason = "El grifo sigue goteando después del arreglo";
+        UUID request = publish();
+        UUID application = idOf(apply(ANA, request, "98500.50").andExpect(status().isCreated()));
+        send("/api/services/requests/" + request + "/applications/" + application + "/selection",
+                CLIENT, "ROLE_CLIENT", null).andExpect(status().isOk());
+        UUID quotation = quote(ANA, request, "105000");
+        send("/api/services/requests/" + request + "/quotations/" + quotation + "/acceptance", CLIENT, "ROLE_CLIENT",
+                null).andExpect(status().isOk());
+        JsonNode contract = objectMapper.readTree(mockMvc.perform(
+                        get("/api/services/requests/" + request + "/contract").with(as(CLIENT, "ROLE_CLIENT")))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        String base = "/api/services/contracts/" + contract.get("id").asText();
+
+        send(base + "/start", ANA, "ROLE_PROFESSIONAL", null).andExpect(status().isOk());
+        send(base + "/finish", ANA, "ROLE_PROFESSIONAL", null).andExpect(status().isOk());
+        send("/api/services/requests/" + request + "/closure-objection", CLIENT, "ROLE_CLIENT",
+                Map.of("reason", reason)).andExpect(status().isOk());
+        send(base + "/finish", ANA, "ROLE_PROFESSIONAL", null).andExpect(status().isOk());
+        send("/api/services/requests/" + request + "/closure", CLIENT, "ROLE_CLIENT", null)
+                .andExpect(status().isOk());
+
+        List<OutboxEvent> events = history(request);
+        assertThat(events).extracting(OutboxEvent::getEventType).containsExactly(
+                "solicitud.publicada", "postulacion.registrada", "prestador.seleccionado", "cotizacion.enviada",
+                "servicio.contratado", "servicio.iniciado", "servicio.finalizado", "servicio.cierre_objetado",
+                "servicio.finalizado", "servicio.cerrado");
+        assertThat(events).extracting(OutboxEvent::getAggregateSequence)
+                .containsExactly(1L, 2L, 3L, 4L, 5L, 6L, 7L, 8L, 9L, 10L);
+        for (OutboxEvent event : events) {
+            assertThat(EventContract.violations(envelope(event))).as(event.getEventType()).isEmpty();
+            assertThat(event.getPayload()).doesNotContain(reason);
+        }
+
+        JsonNode timeline = objectMapper.readTree(mockMvc.perform(
+                        get("/api/services/requests/" + request + "/contract").with(as(CLIENT, "ROLE_CLIENT")))
+                .andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8)).get("timeline");
+        assertThat(timeline.findValuesAsText("toStatus")).containsExactly("PUBLISHED", "PROVIDER_SELECTED",
+                "CONTRACTED", "IN_PROGRESS", "TECHNICIAN_FINISHED", "IN_PROGRESS", "TECHNICIAN_FINISHED", "CLOSED");
+        assertThat(timeline.get(5).get("reason").asText()).isEqualTo(reason);
     }
 
     @Test

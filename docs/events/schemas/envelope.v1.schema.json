@@ -29,7 +29,11 @@
         "prestador.seleccionado",
         "cotizacion.enviada",
         "cotizacion.rechazada",
-        "servicio.contratado"
+        "servicio.contratado",
+        "servicio.iniciado",
+        "servicio.finalizado",
+        "servicio.cierre_objetado",
+        "servicio.cerrado"
       ]
     },
     "schemaVersion": {
@@ -94,6 +98,7 @@
           "enum": [
             "CLIENT",
             "PROFESSIONAL",
+            "COMPANY",
             "SYSTEM"
           ]
         }

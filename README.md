@@ -44,7 +44,7 @@ Contrato completo en [`docs/openapi.yaml`](docs/openapi.yaml).
 | `GET /api/services/requests/{id}` | Una de mis solicitudes; 404 si no existe o es de otro cliente |
 
 El cliente sale siempre del token, nunca del cuerpo ni de la ruta. La dirección exacta se guarda pero no se
-devuelve hasta que la solicitud está `CONTRACTED`.
+devuelve hasta que la solicitud está contratada (`CONTRACTED`) o en curso (`IN_PROGRESS`).
 
 ## Oportunidades compatibles (GC-337, GC-338)
 
@@ -59,8 +59,8 @@ devuelve hasta que la solicitud está `CONTRACTED`.
   por lotes de 100 (el máximo de esa consulta). Es la misma regla que se aplica al postularse (GC-342), así que una
   oportunidad listada es una a la que el técnico puede postularse.
 - **Respuesta:** `{ "items": [...], "nextCursor": "..." | null }`. Cada elemento trae `id`, `category`, `description`,
-  `city`, `zone`, `latitude`, `longitude` (aproximadas), `expectedAt` y `publishedAt`; no incluye al cliente, la dirección
-  exacta ni las fotos.
+  `city`, `zone`, `latitude`, `longitude` (aproximadas), `expectedAt`, `budgetAmount` y `budgetCurrency` (el presupuesto
+  orientativo del cliente, GC-421) y `publishedAt`; no incluye al cliente, la dirección exacta ni las fotos.
 - **Parámetros.** `limit`: de 1 a 50, por defecto 20. `cursor`: el `nextCursor` de la página anterior. Un valor que no se
   pueda interpretar da 400 "Consulta inválida".
 - **Paginación por cursor.** El orden es `publishedAt` descendente y, en empate, `id` descendente; el cursor es la clave de
@@ -74,15 +74,15 @@ devuelve hasta que la solicitud está `CONTRACTED`.
 - **Falla cerrado.** Si ms-users no responde, 503 "Elegibilidad no verificable" y no se devuelve nada.
 - **Pendiente.** No hay total de resultados. Con volumen alto conviene un índice `(status, published_at, id)`.
 
-## Postulaciones (GC-342, GC-423)
+## Postulaciones (GC-342, GC-423, GC-468)
 
 | Método y ruta | Descripción |
 |---|---|
-| `POST /api/services/applications` | El técnico se postula a una solicitud con su precio propuesto (201 + `Location`) |
+| `POST /api/services/applications` | El técnico o la empresa se postula a una solicitud con su precio propuesto (201 + `Location`) |
 | `GET /api/services/applications` | Mis postulaciones, la más reciente primero |
 | `GET /api/services/applications/{id}` | Una de mis postulaciones; 404 si no existe o es de otro técnico |
 
-- Solo `ROLE_PROFESSIONAL`; el técnico sale del token. Tabla `applications` (migración V3), con
+- `ROLE_PROFESSIONAL` o `ROLE_COMPANY`; quien se postula sale del token. Tabla `applications` (migración V3), con
   estados `APPLIED -> SELECTED | REJECTED`.
 - La solicitud debe estar `PUBLISHED` y con el momento esperado por delante (si no, 409).
 - **Elegibilidad:** ms-users decide si el técnico puede atender la solicitud (categoría, zona de atención y
@@ -102,6 +102,18 @@ devuelve hasta que la solicitud está `CONTRACTED`.
   la cotización. No se edita: volver a postularse con otro precio es el mismo 409 de duplicado. Columnas
   `proposed_amount` y `currency` (migración V6), en `NULL` para las postulaciones anteriores, que se devuelven sin
   precio en lugar de uno inventado. La restricción `ck_applications_proposed_price` exige ambos o ninguno.
+- **Postulación empresarial (GC-468, historia GC-465):** una cuenta `ROLE_COMPANY` se postula con
+  `{"serviceRequestId": "...", "technicianId": "...", "proposedAmount": 180000, "currency": "COP"}`, donde
+  `technicianId` es uno de sus técnicos asociados (el ejecutor propuesto). `provider_id` es el `users.id` de la cuenta
+  de la empresa (el `sub` del token) y `technician_id`, el del técnico; `provider_type` vale `INDEPENDENT` o `COMPANY`
+  (migración V12, con `ck_applications_provider_type`: técnico solo y siempre en las de empresa, distinto de la
+  empresa). Antes de guardar, ms-services confirma con ms-users que el técnico es de esa empresa
+  (`POST /internal/companies/technician-association`) y evalúa la elegibilidad **del técnico propuesto**. Respuestas:
+  400 si la empresa no envía `technicianId` o si un técnico independiente lo envía; 422 con `TECHNICIAN_NOT_ASSOCIATED`
+  si no es de la empresa, o con los motivos de elegibilidad; 409 si la empresa ya se postuló a esa solicitud, aunque
+  proponga otro técnico u otro precio (la misma unicidad de V4); 503 si ms-users no responde. Las respuestas traen
+  `providerType` y `technicianId`. Después de la selección no hay flujo empresarial: la empresa no puede cotizar (403
+  por rol) y el técnico propuesto tampoco (409, porque el prestador seleccionado es la empresa).
 
 ## Postulantes de una solicitud (GC-347, GC-425)
 
@@ -113,7 +125,8 @@ devuelve hasta que la solicitud está `CONTRACTED`.
   un UUID, la respuesta es la misma (404 "No existe la solicitud indicada").
 - Lista en orden de llegada (la primera postulación primero); sin postulantes, `200` con `[]`. Sin paginación por
   ahora. Se puede consultar en cualquier estado de la solicitud, para ver también a quién se eligió.
-- Cada elemento trae `id`, `providerId`, `status` (`APPLIED`, `SELECTED` o `REJECTED`), `proposedAmount` y
+- Cada elemento trae `id`, `providerId`, `providerType`, `technicianId`, `status` (`APPLIED`, `SELECTED` o
+  `REJECTED`), `proposedAmount` y
   `currency` (el precio que propuso, GC-423; `null` en postulaciones anteriores), `createdAt` y `updatedAt`.
   No incluye datos de la solicitud ni ubicación.
 - **Perfil público del prestador (GC-425):** cada elemento trae `provider` con `displayName` (nombre e inicial del
@@ -123,6 +136,10 @@ devuelve hasta que la solicitud está `CONTRACTED`.
   ms-users. Un prestador que ms-users ya no reconoce como técnico activo sale con `provider: null`; si ms-users no
   responde, 503 "Perfiles no disponibles" (no se muestran perfiles a medias ni inventados). Nunca se entregan correo,
   teléfono, documento ni ubicación del prestador.
+- **Postulaciones de empresa (GC-468):** `provider` es la empresa (solo `displayName` con su nombre comercial, que
+  ms-services pide en `POST /internal/companies/public-profiles`) y `executor` es el perfil público del técnico que
+  propone. En las de un técnico independiente, `executor` es `null`: el prestador es el mismo que ejecuta. Sin
+  empresas postuladas no se piden perfiles de empresa; si ms-users no los entrega, el mismo 503.
 
 ## Selección de prestador (GC-348)
 
@@ -167,17 +184,24 @@ consulta de revocación se simula).
 | `PUBLISHED` | Publicada por el cliente; visible para prestadores compatibles |
 | `PROVIDER_SELECTED` | El cliente eligió un único prestador |
 | `CONTRACTED` | Contratación formalizada |
+| `IN_PROGRESS` | El prestador contratado inició el servicio (GC-437) |
+| `TECHNICIAN_FINISHED` | El técnico declaró que terminó (GC-441); falta que el cliente confirme o objete |
+| `CLOSED` | El cliente confirmó el cierre (GC-441); definitivo, habilita la evaluación (terminal) |
 | `CANCELLED` | Cancelada (terminal) |
 | `EXPIRED` | Venció sin contratación (terminal) |
 
 ```
-PUBLISHED         -> PROVIDER_SELECTED | CANCELLED | EXPIRED
-PROVIDER_SELECTED -> CONTRACTED | CANCELLED
+PUBLISHED           -> PROVIDER_SELECTED | CANCELLED | EXPIRED
+PROVIDER_SELECTED   -> CONTRACTED | CANCELLED
+CONTRACTED          -> IN_PROGRESS
+IN_PROGRESS         -> TECHNICIAN_FINISHED
+TECHNICIAN_FINISHED -> CLOSED | IN_PROGRESS   (el cliente confirma el cierre o lo objeta)
 ```
 
 **Privacidad.** Los prestadores solo ven la ubicación aproximada (ciudad, zona y coordenadas redondeadas a dos
 decimales). La dirección exacta se guarda aparte y `ServiceRequest#getExactLocation()` solo la entrega cuando
-la solicitud está `CONTRACTED`.
+la solicitud está contratada, en curso, finalizada o cerrada (`ServiceRequestStatus#exposesExactLocation()` es el único
+lugar que lo decide).
 
 ### Supuestos pendientes de validar con el equipo
 
@@ -189,10 +213,49 @@ GC-301.
 - Las categorías se redefinen aquí con los mismos valores que `ms-users`.
 - Las fotos guardan la clave del objeto en el almacenamiento, no la URL.
 
+## Presupuesto orientativo (GC-421)
+
+El cliente indica un presupuesto al publicar (RF-020). Es un **valor único en COP, obligatorio, mayor que cero y solo
+orientativo**: guía al prestador, pero no es un pago, un límite ni el precio de la postulación, la cotización o el contrato.
+
+`POST /api/services/requests` (solo `ROLE_CLIENT`) agrega dos campos planos, igual que `proposedAmount` / `currency`:
+
+```json
+{
+  "category": "PLUMBING",
+  "description": "Fuga de agua debajo del lavamanos",
+  "approximateLocation": { "city": "Bogotá", "zone": "Chapinero", "latitude": 4.6533, "longitude": -74.0836 },
+  "exactLocation": { "address": "Calle 10 # 5-20, apto 301", "latitude": 4.711, "longitude": -74.0721 },
+  "expectedAt": "2026-10-30T15:00:00Z",
+  "budgetAmount": 200000,
+  "budgetCurrency": "COP",
+  "photoKeys": ["requests/a.jpg"]
+}
+```
+
+Las respuestas (`201` al publicar, `GET /api/services/requests`, `GET /api/services/requests/{id}` y cada elemento de
+`GET /api/services/opportunities`) devuelven los mismos dos campos, con el importe a **dos decimales**:
+
+```json
+{ "budgetAmount": 200000.00, "budgetCurrency": "COP" }
+```
+
+- **Validaciones (400 con `errors[]`).** `budgetAmount` obligatorio, mayor que cero, hasta 10 enteros y 2 decimales (máximo
+  `9999999999.99`); `budgetCurrency` obligatoria y solo `COP`. Una moneda desconocida da 400 "Solicitud inválida".
+- **Solicitudes anteriores.** Las publicadas antes de la migración V8 devuelven `budgetAmount: null` y
+  `budgetCurrency: null`; no se les inventó ningún importe. La base exige que ambos campos sean nulos o ambos válidos.
+- **Evento.** `solicitud.publicada` lleva `budget` (`{ "amount": "200000.00", "currency": "COP" }`, como texto decimal) en un
+  campo opcional; sigue en la versión 1.
+- **Privacidad.** El presupuesto no cambia lo que ve cada rol: la dirección exacta sigue protegida hasta la contratación.
+
 ## Cotización (GC-353)
 
 `Quotation` (tabla `quotations`, migración V2): la cotización del prestador seleccionado para una solicitud, con valor,
 moneda, alcance, condiciones, fecha acordada y vigencia (RF-031). El pago del servicio ocurre fuera de Fixia.
+
+El presupuesto del cliente (`service_requests.budget_amount`, GC-421), el precio de la postulación
+(`applications.proposed_amount`, GC-423), el valor de cada cotización (`quotations.amount`) y el precio contratado
+(`service_contracts.amount`) son datos distintos en lugares distintos: ninguno sobrescribe a otro.
 
 | Estado | Nombre (`statusName`) | Significado |
 |---|---|---|
@@ -241,6 +304,14 @@ SENT -> ACCEPTED | REJECTED | EXPIRED | SUPERSEDED
 - **Nueva versión.** Enviar otra cotización deja la `SENT` anterior en `SUPERSEDED` (o `EXPIRED` si ya venció), en la
   misma transacción y con la solicitud bloqueada (`FOR UPDATE`): siempre queda a lo sumo una esperando respuesta y
   dos envíos simultáneos no dejan dos vigentes.
+- **Versión (GC-427, migración V11).** Cada cotización lleva `revision` (1, 2, 3… por solicitud), asignada como el máximo
+  más uno con esa misma solicitud bloqueada, así que ningún número se repite ni se salta. La migración numeró las
+  existentes por antigüedad (`created_at` y, a igual instante, `id`). La columna es distinta de `version`, que es el candado
+  optimista de JPA y no se expone. Hay una restricción única `(service_request_id, revision)`.
+- **Versión vigente (`current`).** La respuesta trae `current: true` solo en la cotización que sigue `SENT` y no ha vencido,
+  la que el cliente aún puede aceptar o rechazar; una aceptada, rechazada, reemplazada o vencida no lo es. Los listados
+  (cliente por solicitud y prestador por solicitud) van de la versión más reciente a la más antigua. La contraoferta
+  estructurada del cliente queda fuera.
 - **Vencimiento.** La respuesta trae `expired: true` cuando la cotización sigue `SENT` pero su vigencia ya pasó; no se
   puede aceptar. Ningún proceso la pasa todavía a `EXPIRED` por sí solo.
 - **Aceptar o rechazar (GC-358).** Responde el cliente dueño de la solicitud (otro cliente o una cotización de otra solicitud
@@ -253,8 +324,8 @@ SENT -> ACCEPTED | REJECTED | EXPIRED | SUPERSEDED
 - **Aceptar contrata (GC-359).** Al aceptar, en la misma transacción, la solicitud pasa a `CONTRACTED` y se guarda la
   contratación con una copia de lo acordado (ver «Contratación»); si algo falla, la cotización sigue enviada. Rechazar no
   cambia la solicitud: el prestador puede enviar otra cotización.
-- El evento `cotizacion.enviada` (ADR-024, outbox) queda pendiente: el servicio todavía
-  no tiene tabla OUTBOX ni publicador.
+- El evento `cotizacion.enviada` se escribe en el Outbox al enviar (ver «Eventos de negocio»), con `revision` como campo
+  opcional.
 
 ## Contratación (GC-359)
 
@@ -276,9 +347,54 @@ de la solicitud (`CONTRACTED`); no se duplica en la contratación.
 | `GET /api/services/requests/{id}/contract` | `ROLE_CLIENT` | La contratación de mi solicitud; 404 si no existe, es de otro cliente o aún no se contrató |
 | `GET /api/services/contracts` | `ROLE_PROFESSIONAL` | Mis contrataciones, la más reciente primero |
 | `GET /api/services/contracts/{contractId}` | `ROLE_PROFESSIONAL` | Una de mis contrataciones; 404 si es de otro prestador |
+| `POST /api/services/contracts/{contractId}/start` | `ROLE_PROFESSIONAL` | Inicio de la ejecución (GC-437); devuelve la contratación en curso |
+| `POST /api/services/contracts/{contractId}/finish` | `ROLE_PROFESSIONAL` | El técnico declara que terminó (GC-441); no cierra el servicio |
+| `POST /api/services/requests/{id}/closure` | `ROLE_CLIENT` | El cliente confirma el cierre (GC-441); definitivo |
+| `POST /api/services/requests/{id}/closure-objection` | `ROLE_CLIENT` | El cliente objeta el cierre con `{ "reason": "..." }` (GC-441); el servicio vuelve a `IN_PROGRESS` |
 
 La respuesta (`Contract`) trae lo acordado y un resumen de la solicitud con `exactLocation`; no trae datos de contacto (el
 cliente y el prestador llegan como UUID de ms-users).
+
+### Inicio de la ejecución y historial (GC-437)
+
+- **Iniciar.** El prestador contratado hace `POST /api/services/contracts/{contractId}/start` (sin cuerpo): la solicitud pasa
+  de `CONTRACTED` a `IN_PROGRESS`. El prestador sale del token; una contratación ajena, inexistente o con un id que no es UUID
+  da la misma 404. Repetir el inicio sobre un servicio en curso responde 200 con el estado actual y no cambia nada ni
+  publica otro evento; dos inicios simultáneos dejan uno solo (la solicitud se toma con bloqueo). Desde otro estado, 409
+  "Transición de estado no permitida". La finalización y el cierre están más abajo (GC-441).
+- **Una sola transacción.** El cambio de estado, su fila en el historial y el evento `servicio.iniciado` del Outbox salen
+  juntos o no sale ninguno.
+- **Estado e historial.** `GET /api/services/requests/{id}/contract` (cliente), `GET /api/services/contracts/{contractId}`
+  (prestador) y el propio `start` devuelven `serviceStatus` y `timeline`, iguales para los dos participantes. Cada elemento
+  de `timeline` trae `fromStatus` (nulo en la publicación), `toStatus`, `actorId`, `actorRole` (`CLIENT`, `PROFESSIONAL` o
+  `SYSTEM`), `reason` (si hay) y `occurredAt`, del más antiguo al más reciente. El listado `GET /api/services/contracts` trae
+  `serviceStatus` pero no `timeline`.
+- **Tabla `service_request_transitions` (migración V9).** Se anota la publicación, la selección del prestador, la
+  contratación y el inicio. Las transiciones anteriores a la tabla no se reconstruyen: un servicio antiguo puede traer el
+  historial vacío o parcial. Es distinta del Outbox: este es técnico, aquel es el que ven los usuarios.
+- **Dirección exacta.** Sigue llegando al prestador contratado y al cliente mientras el servicio está en curso.
+
+### Finalización y cierre (GC-441)
+
+El técnico y el cliente toman decisiones distintas y auditables; no hay cierre automático por silencio.
+
+- **Finalizar (técnico).** `POST /api/services/contracts/{contractId}/finish`, sin cuerpo: `IN_PROGRESS -> TECHNICIAN_FINISHED`.
+  No cierra el servicio ni exige evidencias (son opcionales y llegan con GC-439). Repetirlo responde 200 sin duplicar; sin haber
+  iniciado, o ya cerrado, 409.
+- **Confirmar el cierre (cliente).** `POST /api/services/requests/{id}/closure`, sin cuerpo: `TECHNICIAN_FINISHED -> CLOSED`,
+  definitivo. Confirmar un servicio ya cerrado responde 200 sin duplicar (cierre doble); si el técnico aún no lo declaró
+  finalizado, 409.
+- **Objetar el cierre (cliente).** `POST /api/services/requests/{id}/closure-objection` con `{ "reason": "..." }` (obligatorio,
+  máximo 500 caracteres): `TECHNICIAN_FINISHED -> IN_PROGRESS`. No es un cierre satisfactorio ni una disputa formal; el motivo
+  queda en el historial, que ven el cliente y el técnico, y **no** viaja en el evento. Repetir la misma objeción responde 200
+  sin duplicar; otro motivo, o desde otro estado, 409. Después el técnico puede finalizar otra vez y el cliente cerrar.
+- **Un servicio cerrado no se reabre.** Objetar, finalizar o iniciar un servicio `CLOSED` da 409 y no cambia nada.
+- **Mismos permisos que el resto:** el actor sale del token; un técnico o cliente ajeno recibe la misma 404 que si no existiera;
+  el rol equivocado, 403; sin token, 401. Cada operación es una sola transacción (estado + historial + evento del Outbox) con la
+  solicitud bloqueada, así que dos simultáneas dejan una sola.
+- **Respuesta.** Las tres devuelven la misma `Contract` que `GET /requests/{id}/contract`, con `serviceStatus` y `timeline`.
+- **Migración V10:** amplía las restricciones de estado de `service_requests`; no hay columnas nuevas (quién, cuándo y el motivo
+  los guarda `service_request_transitions`). La dirección exacta se sigue entregando hasta `CLOSED` y después.
 
 ## Eventos de negocio (GC-436)
 
@@ -286,8 +402,9 @@ Contrato de los hechos que ms-services publica en Kafka: [docs/events/README.md]
 esquemas JSON en `docs/events/schemas` y un flujo completo de ejemplo en `docs/events/examples`.
 
 - Eventos completos (payload autosuficiente), uno por cambio real de estado: `solicitud.publicada`,
-  `postulacion.registrada`, `prestador.seleccionado`, `cotizacion.enviada`, `cotizacion.rechazada` y
-  `servicio.contratado`.
+  `postulacion.registrada`, `prestador.seleccionado`, `cotizacion.enviada`, `cotizacion.rechazada`,
+  `servicio.contratado`, `servicio.iniciado` (GC-437), `servicio.finalizado`, `servicio.cierre_objetado` y
+  `servicio.cerrado` (GC-441).
 - Tópico `fixia.services.service-requests`, con el id de la solicitud como clave y una secuencia por solicitud.
 - Se escriben en un Outbox en la misma transacción (GC-433) y un relay los publica (GC-434); el lakehouse los
   conserva en RustFS de forma idempotente por `eventId` (GC-435).

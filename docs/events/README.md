@@ -64,7 +64,7 @@ coinciden, manda el esquema.
 | `aggregate.sequence` | entero ≥ 1 | Posición del hecho en la historia de la solicitud (sección 8) |
 | `correlationId` | UUID | Id de la solicitud. Otros productores (pagos, evaluaciones) usarán el mismo valor para enlazar sus eventos con este servicio |
 | `actor.userId` | UUID o null | `users.id` de quien hizo la operación (el `sub` del token sin `usr_`); null si fue el sistema |
-| `actor.role` | `CLIENT`, `PROFESSIONAL` o `SYSTEM` | Rol con el que actuó |
+| `actor.role` | `CLIENT`, `PROFESSIONAL`, `COMPANY` o `SYSTEM` | Rol con el que actuó (`COMPANY` desde GC-468) |
 | `data` | objeto | Datos del hecho según el esquema de su tipo y versión |
 
 Los importes viajan como `{"amount": "150000.00", "currency": "COP"}`: el valor es **texto** con dos decimales, para
@@ -80,9 +80,20 @@ aceptar una cotización ya aceptada con el contrato ya creado) no publica otro e
 | `solicitud.publicada` | `ServiceRequestService#create` (RF-020) | Cliente | Categoría, descripción, ubicación **aproximada**, momento esperado, número de fotos |
 | `postulacion.registrada` | `ApplicationService#apply` (RF-024, GC-423) | Técnico | Postulación, prestador y **precio propuesto** |
 | `prestador.seleccionado` | `ServiceRequestService#selectProvider` (RF-026 a RF-028) | Cliente | Postulación y prestador elegidos, su precio, postulaciones rechazadas |
-| `cotizacion.enviada` | `QuotationService#send` (RF-031) | Técnico | Precio, alcance, condiciones, fecha acordada, vigencia y cotizaciones que reemplaza o vence |
+| `cotizacion.enviada` | `QuotationService#send` (RF-031) | Técnico | Precio, alcance, condiciones, fecha acordada, vigencia, cotizaciones que reemplaza o vence y, opcional, el número de versión (`revision`, GC-427) |
 | `cotizacion.rechazada` | `QuotationService#reject` (RF-032, RF-033) | Cliente | Cotización y precio rechazados |
 | `servicio.contratado` | `QuotationService#accept`, al crear el contrato (RF-034, RF-035, ADR-046) | Cliente | Copia inmutable de lo contratado: precio, alcance, condiciones, fecha acordada y de contratación |
+| `servicio.iniciado` | `ContractService#start`, al pasar de `CONTRACTED` a `IN_PROGRESS` (RF-045, GC-437) | Técnico | Contrato, solicitud, cliente y prestador, momento del inicio y estado `IN_PROGRESS` |
+| `servicio.finalizado` | `ContractService#finish`, al pasar de `IN_PROGRESS` a `TECHNICIAN_FINISHED` (RF-047, GC-441) | Técnico | Contrato, solicitud, cliente y prestador, momento de la declaración y estado `TECHNICIAN_FINISHED`; sin `evidenceCount` hasta GC-439 |
+| `servicio.cierre_objetado` | `ContractService#objectClosure`, al pasar de `TECHNICIAN_FINISHED` a `IN_PROGRESS` (GC-441) | Cliente | Contrato, solicitud, cliente y prestador, momento de la objeción y estado `IN_PROGRESS`; **sin el motivo** |
+| `servicio.cerrado` | `ContractService#confirmClosure`, al pasar de `TECHNICIAN_FINISHED` a `CLOSED` (RF-048, GC-441) | Cliente | Contrato, solicitud, cliente y prestador, momento del cierre y estado `CLOSED` |
+
+`servicio.iniciado`, `servicio.finalizado`, `servicio.cierre_objetado` y `servicio.cerrado` se escriben en la misma
+transacción que el cambio de estado y su anotación en el historial que ven los usuarios; repetir una operación que ya se
+hizo (iniciar un servicio en curso, finalizar uno finalizado, cerrar uno cerrado, repetir la misma objeción) no publica
+otro. Un servicio objetado puede volver a finalizarse: la secuencia del servicio lo muestra como un nuevo
+`servicio.finalizado` después del `servicio.cierre_objetado`. El motivo de la objeción no viaja en el evento porque puede
+traer datos personales.
 
 `servicio.contratado` implica que la cotización quedó aceptada: no hay un evento `cotizacion.aceptada` aparte,
 porque ambas cosas ocurren en la misma transacción y el contrato ya trae la cotización.
@@ -93,7 +104,6 @@ porque ambas cosas ocurren en la misma transacción y el contrato ya trae la cot
 | --- | --- | --- |
 | `solicitud.vencida`, `cotizacion.vencida` | `ms-services` (proceso programado, DEC-S4-11) | Que exista el proceso que vence solicitudes y cotizaciones |
 | `solicitud.cancelada` | `ms-services` | Que exista la cancelación en la API |
-| Inicio, finalización y cierre del servicio | `ms-services` | GC-409 y GC-411 |
 | `evaluacion.registrada` | `ms-users`, con su propio Outbox y tópico | GC-444 |
 
 Un evento reservado se agrega a este contrato con su esquema antes de publicarse; mientras no tenga esquema, el
@@ -128,8 +138,9 @@ Primer hecho del flujo de ejemplo
 }
 ```
 
-El flujo completo tiene ocho hechos de la misma solicitud, en orden: publicación, dos postulaciones con precio,
-selección, cotización, rechazo, segunda cotización y contratación.
+El flujo completo tiene trece hechos de la misma solicitud, en orden: publicación, dos postulaciones con precio,
+selección, cotización, rechazo, segunda cotización, contratación, inicio del servicio, finalización por el técnico,
+objeción del cliente al cierre, nueva finalización y cierre confirmado.
 
 ## 7. Privacidad
 
@@ -161,7 +172,8 @@ escribe el contenido del evento en los logs (solo `eventId`, `eventType` y la se
 - **Cambio compatible, misma versión:** agregar un campo opcional a `data`. Los consumidores deben ignorar los campos
   que no conocen (lector tolerante) y el esquema se actualiza en el mismo PR. Ejemplo real próximo: la postulación
   empresarial (GC-468) agregará a `postulacion.registrada` los campos opcionales `providerType` (`INDEPENDENT` o
-  `COMPANY`) y `technicianId`; sigue siendo la versión 1.
+  `COMPANY`) y `technicianId`; sigue siendo la versión 1. Ya hecho así: `budget` en `solicitud.publicada` (GC-421) y
+  `revision` en `cotizacion.enviada` (GC-427).
 - **Cambio incompatible, versión nueva:** quitar o renombrar un campo, cambiar su tipo o su significado, o volver
   obligatorio uno opcional. Se crea `<tipo>.v2.schema.json`, `ms-services` publica la versión nueva y el consumidor
   debe aceptar la versión nueva y la anterior durante la transición. Ejemplo: si `proposedPrice` dejara de ser un
@@ -170,13 +182,14 @@ escribe el contenido del evento en los logs (solo `eventId`, `eventType` y la se
   su `schemaVersion`.
 - **Dos versiones de un mismo servicio.** La historia de una solicitud es la sucesión de sus eventos. En el ejemplo,
   la secuencia 1 (`solicitud.publicada`) guarda la solicitud en `PUBLISHED` y la secuencia 8 (`servicio.contratado`)
-  la guarda contratada con Ana por 105000.00 COP. Ambas quedan en el lakehouse: el estado posterior no borra ni
+  la guarda contratada con Ana por 105000.00 COP, y la secuencia 9 (`servicio.iniciado`) la deja en curso y la
+  secuencia 13 (`servicio.cerrado`) la deja cerrada. Todas quedan en el lakehouse: el estado posterior no borra ni
   modifica el hecho anterior.
 
 ## 10. Outbox en `ms-services` (para GC-433 y GC-434)
 
-Tabla `outbox_events` en la base de `ms-services`, migración V7 (GC-433). El presupuesto de GC-421 usa la migración
-siguiente libre.
+Tabla `outbox_events` en la base de `ms-services`, migración V7 (GC-433). El presupuesto de GC-421 usa la migración V8
+(`service_requests.budget_amount` y `budget_currency`); `solicitud.publicada` lo lleva en el campo opcional `budget`.
 
 | Columna | Tipo | Parte | Regla |
 | --- | --- | --- | --- |

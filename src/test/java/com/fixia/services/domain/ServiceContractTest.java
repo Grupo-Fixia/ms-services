@@ -24,7 +24,8 @@ class ServiceContractTest {
     private static ServiceRequest selectedRequest() {
         ServiceRequest request = ServiceRequest.publish(CLIENT, ServiceCategory.PLUMBING, "Fuga de agua en el baño",
                 new ApproximateLocation("Bogotá", "Chapinero"), new ExactLocation("Calle 10 # 5-20, apto 301"),
-                NOW.plus(Duration.ofDays(5)), List.of(), NOW.minusSeconds(3600));
+                NOW.plus(Duration.ofDays(5)),
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), NOW.minusSeconds(3600));
         ReflectionTestUtils.setField(request, "id", UUID.randomUUID());
         request.selectProvider(PROVIDER, NOW.minusSeconds(60));
         return request;
@@ -33,7 +34,7 @@ class ServiceContractTest {
     private static Quotation sentQuotation(ServiceRequest request, UUID provider) {
         Quotation quotation = Quotation.send(request, provider, new BigDecimal("350000"), CurrencyCode.COP,
                 "Cambio de tubería", "Incluye materiales; garantía de 3 meses", AGREED, NOW.plus(Duration.ofDays(1)),
-                NOW);
+                1, NOW);
         ReflectionTestUtils.setField(quotation, "id", UUID.randomUUID());
         return quotation;
     }

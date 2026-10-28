@@ -2,6 +2,7 @@ package com.fixia.services.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fixia.services.domain.ApproximateLocation;
+import com.fixia.services.domain.CurrencyCode;
 import com.fixia.services.domain.ExactLocation;
 import com.fixia.services.domain.ServiceCategory;
 import com.fixia.services.domain.ServiceRequest;
@@ -19,6 +20,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -30,6 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -301,13 +304,85 @@ class ServiceRequestControllerTest {
         mockMvc.perform(get("/actuator/health")).andExpect(status().isOk());
     }
 
+    // ---------- Presupuesto orientativo (GC-421) ----------
+
+    @Test
+    void elPresupuestoSePublicaSeGuardaYSeDevuelveIgualAlConsultar() throws Exception {
+        Map<String, Object> body = validBody();
+        body.put("budgetAmount", 185000.5);
+
+        String created = mockMvc.perform(post(BASE).with(client(CLIENT)).contentType(MediaType.APPLICATION_JSON)
+                        .content(json(body)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.budgetAmount").value(185000.5))
+                .andExpect(jsonPath("$.budgetCurrency").value("COP"))
+                .andReturn().getResponse().getContentAsString();
+        UUID id = UUID.fromString(objectMapper.readTree(created).get("id").asText());
+
+        assertThat(jdbcTemplate.queryForObject("SELECT budget_amount FROM service_requests WHERE id = ?",
+                String.class, id)).isEqualTo("185000.50");
+        mockMvc.perform(get(BASE + "/" + id).with(client(CLIENT)))
+                .andExpect(jsonPath("$.budgetAmount").value(185000.5))
+                .andExpect(jsonPath("$.budgetCurrency").value("COP"));
+        mockMvc.perform(get(BASE).with(client(CLIENT)))
+                .andExpect(jsonPath("$[0].budgetAmount").value(185000.5))
+                .andExpect(jsonPath("$[0].budgetCurrency").value("COP"));
+    }
+
+    @Test
+    void sinPresupuestoOConUnoInvalidoDevuelve400SinGuardarNada() throws Exception {
+        Map<String, Object> missing = validBody();
+        missing.remove("budgetAmount");
+        missing.remove("budgetCurrency");
+        mockMvc.perform(post(BASE).with(client(CLIENT)).contentType(MediaType.APPLICATION_JSON)
+                        .content(json(missing)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.title").value("Datos inválidos"))
+                .andExpect(jsonPath("$.errors[*].field", hasItems("budgetAmount", "budgetCurrency")));
+
+        // Cero, negativo, más de dos decimales y más de diez enteros.
+        for (Object amount : List.of(0, -50000, 1000.123, 10000000000L)) {
+            Map<String, Object> body = validBody();
+            body.put("budgetAmount", amount);
+            mockMvc.perform(post(BASE).with(client(CLIENT)).contentType(MediaType.APPLICATION_JSON)
+                            .content(json(body)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.errors[*].field", hasItem("budgetAmount")));
+        }
+
+        Map<String, Object> unknownCurrency = validBody();
+        unknownCurrency.put("budgetCurrency", "USD");
+        mockMvc.perform(post(BASE).with(client(CLIENT)).contentType(MediaType.APPLICATION_JSON)
+                        .content(json(unknownCurrency)))
+                .andExpect(status().isBadRequest());
+
+        assertThat(repository.count()).isZero();
+    }
+
+    @Test
+    void unaSolicitudAnteriorSinPresupuestoSigueConsultableSinImporteInventado() throws Exception {
+        ServiceRequest old = save(CLIENT, "Anterior", Instant.now(), List.of());
+        jdbcTemplate.update("UPDATE service_requests SET budget_amount = NULL, budget_currency = NULL WHERE id = ?",
+                old.getId());
+
+        mockMvc.perform(get(BASE + "/" + old.getId()).with(client(CLIENT)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.description").value("Anterior"))
+                .andExpect(jsonPath("$.budgetAmount").value(nullValue()))
+                .andExpect(jsonPath("$.budgetCurrency").value(nullValue()));
+        mockMvc.perform(get(BASE).with(client(CLIENT)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].budgetAmount").value(nullValue()));
+    }
+
     // ---------- Utilidades ----------
 
     private ServiceRequest save(UUID clientId, String description, Instant publishedAt, List<String> photoKeys) {
         return repository.saveAndFlush(ServiceRequest.publish(clientId, ServiceCategory.PLUMBING, description,
                 new ApproximateLocation("Bogotá", "Chapinero", 4.6533, -74.0836),
                 new ExactLocation("Calle 10 # 5-20, apto 301", 4.7110, -74.0721),
-                publishedAt.plus(Duration.ofDays(2)), photoKeys, publishedAt));
+                publishedAt.plus(Duration.ofDays(2)),
+                new BigDecimal("200000"), CurrencyCode.COP, photoKeys, publishedAt));
     }
 
     private static RequestPostProcessor client(UUID clientId) {
@@ -327,6 +402,8 @@ class ServiceRequestControllerTest {
         body.put("exactLocation", Map.of("address", "Calle 10 # 5-20, apto 301",
                 "latitude", 4.7110, "longitude", -74.0721));
         body.put("expectedAt", Instant.now().plus(Duration.ofDays(2)).toString());
+        body.put("budgetAmount", 200000);
+        body.put("budgetCurrency", "COP");
         body.put("photoKeys", List.of("requests/a.jpg", "requests/b.jpg"));
         return body;
     }

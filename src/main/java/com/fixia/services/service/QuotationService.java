@@ -1,5 +1,6 @@
 package com.fixia.services.service;
 
+import com.fixia.services.domain.ActorRole;
 import com.fixia.services.domain.Quotation;
 import com.fixia.services.domain.QuotationStatus;
 import com.fixia.services.domain.ServiceContract;
@@ -31,15 +32,17 @@ public class QuotationService {
     private final ServiceRequestRepository serviceRequestRepository;
     private final QuotationRepository quotationRepository;
     private final ContractService contractService;
+    private final ServiceRequestHistory history;
     private final BusinessEventRecorder events;
     private final Clock clock;
 
     public QuotationService(ServiceRequestRepository serviceRequestRepository,
                             QuotationRepository quotationRepository, ContractService contractService,
-                            BusinessEventRecorder events, Clock clock) {
+                            ServiceRequestHistory history, BusinessEventRecorder events, Clock clock) {
         this.serviceRequestRepository = serviceRequestRepository;
         this.quotationRepository = quotationRepository;
         this.contractService = contractService;
+        this.history = history;
         this.events = events;
         this.clock = clock;
     }
@@ -74,10 +77,12 @@ public class QuotationService {
         }
 
         Instant now = clock.instant();
+        // La solicitud ya está bloqueada: nadie más puede enviar o responder a la vez, así que máximo + 1 no se repite.
+        int revision = quotationRepository.maxRevision(request.getId()) + 1;
         Quotation quotation;
         try {
             quotation = Quotation.send(request, providerId, body.amount(), body.currency(), body.scope(),
-                    body.conditions(), body.agreedAt(), body.validUntil(), now);
+                    body.conditions(), body.agreedAt(), body.validUntil(), revision, now);
         } catch (IllegalArgumentException e) {
             // Reglas del dominio que la validación del cuerpo no cubre (fechas frente al reloj del servicio).
             throw new InvalidQuotationException(e.getMessage(), e);
@@ -102,8 +107,8 @@ public class QuotationService {
     @Transactional(readOnly = true)
     public List<Quotation> listMine(UUID providerId, UUID serviceRequestId) {
         return serviceRequestId == null
-                ? quotationRepository.findByProviderIdOrderByCreatedAtDesc(providerId)
-                : quotationRepository.findByProviderIdAndServiceRequestIdOrderByCreatedAtDesc(providerId,
+                ? quotationRepository.findByProviderIdOrderByCreatedAtDescIdDesc(providerId)
+                : quotationRepository.findByProviderIdAndServiceRequestIdOrderByRevisionDesc(providerId,
                 serviceRequestId);
     }
 
@@ -123,7 +128,7 @@ public class QuotationService {
         serviceRequestRepository.findById(serviceRequestId)
                 .filter(request -> request.getClientId().equals(clientId))
                 .orElseThrow(ServiceRequestNotFoundException::new);
-        return quotationRepository.findByServiceRequestIdOrderByCreatedAtDesc(serviceRequestId);
+        return quotationRepository.findByServiceRequestIdOrderByRevisionDesc(serviceRequestId);
     }
 
     /**
@@ -205,11 +210,13 @@ public class QuotationService {
 
     /**
      * Formaliza la contratación: la solicitud pasa a {@code CONTRACTED}, se guarda lo acordado (GC-359) y se registra
-     * {@code servicio.contratado} (GC-433). Es el único lugar donde nace un contrato, así que el evento sale una sola
-     * vez aunque la aceptación se repita.
+     * {@code servicio.contratado} (GC-433) y la transición queda en el historial (GC-437). Es el único lugar donde nace
+     * un contrato, así que el evento y el historial salen una sola vez aunque la aceptación se repita.
      */
     private void contract(ServiceRequest request, Quotation quotation, Instant now) {
         request.contract(now);
+        history.record(request.getId(), ServiceRequestStatus.PROVIDER_SELECTED, ServiceRequestStatus.CONTRACTED,
+                request.getClientId(), ActorRole.CLIENT, null, now);
         ServiceContract contract = contractService.formalize(request, quotation, now);
         events.record(BusinessEvents.serviceContracted(contract), request.getId(),
                 BusinessEvents.Actor.client(request.getClientId()), contract.getContractedAt());

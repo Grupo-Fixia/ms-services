@@ -70,12 +70,12 @@ class ServiceContractRepositoryTest {
         Instant now = now();
         ServiceRequest request = ServiceRequest.publish(CLIENT, ServiceCategory.PLUMBING, "Fuga de agua",
                 new ApproximateLocation("Bogotá", "Chapinero"), new ExactLocation("Calle 10 # 5-20"),
-                now.plus(Duration.ofDays(5)), List.of(), now);
+                now.plus(Duration.ofDays(5)), new BigDecimal("200000"), CurrencyCode.COP, List.of(), now);
         request.selectProvider(provider, now);
         ServiceRequest savedRequest = serviceRequestRepository.saveAndFlush(request);
         Quotation quotation = Quotation.send(savedRequest, provider, new BigDecimal("90000.50"), CurrencyCode.COP,
                 "Cambio de empaque", "Pago al terminar", now.plus(Duration.ofHours(2)), now.plus(Duration.ofHours(1)),
-                now);
+                1, now);
         quotation.accept(now);
         Quotation savedQuotation = quotationRepository.saveAndFlush(quotation);
         savedRequest.contract(now);

@@ -18,19 +18,27 @@ class SensitiveDataToStringTest {
     void laSolicitudDeCreacionNoImprimeDescripcionNiDirecciones() {
         CreateServiceRequestRequest request = new CreateServiceRequestRequest(ServiceCategory.PLUMBING,
                 "Descripción privada", new ApproximateLocationRequest("Bogotá", "Chapinero", 4.6, -74.0),
-                new ExactLocationRequest("Calle 10 # 5-20", 4.7, -74.1), Instant.now(), List.of("a.jpg"));
+                new ExactLocationRequest("Calle 10 # 5-20", 4.7, -74.1), Instant.now(),
+                new BigDecimal("234567.89"), CurrencyCode.COP, List.of("a.jpg"));
 
         assertThat(request.toString())
                 .contains("PLUMBING")
-                .doesNotContain("Descripción privada", "Calle 10", "Chapinero", "Bogotá", "a.jpg");
+                .doesNotContain("Descripción privada", "Calle 10", "Chapinero", "Bogotá", "a.jpg", "234567");
     }
 
     @Test
     void elPrecioPropuestoDeLaPostulacionNoSeImprime() {
         CreateApplicationRequest request = new CreateApplicationRequest(UUID.randomUUID(),
-                new BigDecimal("187654.32"), CurrencyCode.COP);
+                new BigDecimal("187654.32"), CurrencyCode.COP, null);
 
         assertThat(request.toString()).doesNotContain("187654");
+    }
+
+    @Test
+    void elMotivoDeLaObjecionAlCierreNoSeImprime() {
+        ClosureObjectionRequest request = new ClosureObjectionRequest("El grifo de mi casa en la Calle 10 sigue roto");
+
+        assertThat(request.toString()).doesNotContain("grifo", "Calle 10");
     }
 
     @Test

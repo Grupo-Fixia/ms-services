@@ -48,7 +48,8 @@ class ApplicationServiceDuplicateTest {
     private final TechnicianEligibilityClient eligibility = mock(TechnicianEligibilityClient.class);
     private final TransactionTemplate transactions = mock(TransactionTemplate.class);
     private final BusinessEventRecorder events = mock(BusinessEventRecorder.class);
-    private final ApplicationService service = new ApplicationService(requests, applications, eligibility, events,
+    private final ApplicationService service = new ApplicationService(requests, applications, eligibility,
+            mock(com.fixia.services.client.CompanyClient.class), events,
             transactions, Clock.fixed(NOW, ZoneOffset.UTC));
 
     private ServiceRequest request;
@@ -57,7 +58,8 @@ class ApplicationServiceDuplicateTest {
     @SuppressWarnings("unchecked")
     void setUp() {
         request = ServiceRequest.publish(UUID.randomUUID(), ServiceCategory.PLUMBING, "Fuga",
-                new ApproximateLocation("Bogotá", "Chapinero"), null, NOW.plus(Duration.ofDays(2)), List.of(),
+                new ApproximateLocation("Bogotá", "Chapinero"), null, NOW.plus(Duration.ofDays(2)),
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(),
                 NOW.minusSeconds(60));
         ReflectionTestUtils.setField(request, "id", UUID.randomUUID());
         when(requests.findById(request.getId())).thenReturn(Optional.of(request));

@@ -80,12 +80,12 @@ class ContractAtomicityTest {
         Instant now = Instant.now();
         ServiceRequest request = ServiceRequest.publish(CLIENT, ServiceCategory.PLUMBING, "Fuga de agua",
                 new ApproximateLocation("Bogotá", "Chapinero"), new ExactLocation("Calle 10 # 5-20"),
-                now.plus(Duration.ofDays(5)), List.of(), now);
+                now.plus(Duration.ofDays(5)), new BigDecimal("200000"), CurrencyCode.COP, List.of(), now);
         request.selectProvider(PROVIDER, now);
         ServiceRequest saved = serviceRequestRepository.saveAndFlush(request);
         Quotation quotation = quotationRepository.saveAndFlush(Quotation.send(saved, PROVIDER,
                 new BigDecimal("90000"), CurrencyCode.COP, "Alcance", "Condiciones", now.plus(Duration.ofDays(3)),
-                now.plus(Duration.ofDays(1)), now));
+                now.plus(Duration.ofDays(1)), 1, now));
         Mockito.doThrow(new IllegalStateException("fallo simulado al guardar la contratación"))
                 .when(contractService).formalize(any(), any(), any());
 
