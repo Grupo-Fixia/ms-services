@@ -22,7 +22,7 @@ tareas del Sprint 5 en Jira.
 | --- | --- |
 | Identidad | El actor sale siempre del token: `sub` = `usr_<users.id>` y `roles` = `ROLE_CLIENT`, `ROLE_PROFESSIONAL`, `ROLE_ADMIN` (y `ROLE_COMPANY`, sección 8). Nunca se confía en un id de usuario del cuerpo |
 | Referencias entre servicios | Siempre `users.id` de ms-users (UUID), sin clave foránea entre bases (Database per Service) |
-| Rutas por rol en ms-services | `/api/services/requests/**` cliente; `/applications/**`, `/opportunities/**`, `/quotations/**`, `/contracts/**` técnico. Las rutas internas van bajo `/internal/**` con `X-Internal-Api-Key` y no pasan por el gateway |
+| Rutas por rol en ms-services | `/api/services/requests/**` cliente; `/applications/**` y `/opportunities/**` técnico y empresa (GC-468); `/quotations/**`, `/contracts/**` técnico. Las rutas internas van bajo `/internal/**` con `X-Internal-Api-Key` y no pasan por el gateway |
 | Dinero en la API | Dos campos planos: el importe (`proposedAmount`, `amount`, `budgetAmount`…) como número con hasta 2 decimales, mayor que 0 y máximo 9999999999.99, y su moneda (`currency`, solo `COP`) |
 | Dinero en eventos | Texto decimal con 2 decimales (`"150000.00"`), ver GC-436 |
 | Fechas | ISO-8601 en UTC con `Z`. El reloj del servicio tiene precisión de microsegundos, igual que la base |
@@ -235,7 +235,9 @@ Implementado por Tomás R. (V8 de ms-users), con dos ajustes frente a la propues
 - `GET /api/users/companies/me` y `GET /api/users/companies/me/technicians` (`ROLE_COMPANY`).
 - Internas para ms-services: `POST /internal/companies/technician-association` con
   `{companyAdminUserId, technicianUserId}` → `{associated}` (GC-466), y `POST /internal/companies/public-profiles` con
-  `{companyAdminUserIds}` → `{profiles: [{companyAdminUserId, name}]}` (GC-468).
+  `{companyAdminUserIds}` → `{profiles: [{companyAdminUserId, name}]}` (GC-468), y
+  `POST /internal/companies/technicians` con `{companyAdminUserId}` → `{technicianUserIds}`, los técnicos activos de la
+  empresa (GC-468, oportunidades).
 - ❓ Sigue abierto si un técnico asociado puede postularse además como independiente: hoy **sí puede** (nada lo
   impide). Decide el PO.
 
@@ -260,9 +262,18 @@ Implementado por Tomás R. (V8 de ms-users), con dos ajustes frente a la propues
 - Eventos: `postulacion.registrada` gana `providerType` y `technicianId`, y `prestador.seleccionado` gana
   `selectedProviderType` y `selectedTechnicianId`, todos opcionales; el sobre admite `COMPANY` como rol del actor.
   Siguen en versión 1 (esquemas actualizados en `docs/events/schemas`).
-- **Fuera de GC-468:** que la empresa **vea oportunidades**. `/api/services/opportunities` sigue siendo solo de técnicos
-  y se filtra por la elegibilidad de cada uno. ❓ Si la app empresarial lo necesita, definir con el PO qué oportunidades
-  ve una empresa (por ejemplo, las compatibles con alguno de sus técnicos).
+- ✅ **La empresa ve oportunidades.** Lo pidió el PO: la empresa ve la publicación y, al postularse, escoge cuál de sus
+  técnicos pone. `GET /api/services/opportunities` acepta `ROLE_COMPANY` y le ofrece las solicitudes a las que aún no se
+  ha postulado y que **al menos uno** de sus técnicos activos puede atender (misma elegibilidad de ms-users, consultada
+  por técnico). Cada elemento trae `eligibleTechnicianIds`; el front muestra esos técnicos y envía uno como
+  `technicianId` en la postulación. Sin técnicos, página vacía. Ejemplo de elemento:
+
+  ```json
+  { "id": "…", "category": "PLUMBING", "description": "Fuga de agua en el baño", "city": "Cali", "zone": "Norte",
+    "latitude": 3.47, "longitude": -76.52, "expectedAt": "2026-11-02T15:00:00Z", "budgetAmount": 200000.00,
+    "budgetCurrency": "COP", "publishedAt": "2026-10-30T14:00:00Z",
+    "eligibleTechnicianIds": ["7ec00000-0000-4000-8000-000000000001"] }
+  ```
 
 ## 9. Historial propio (🟡 GC-448, GC-449)
 

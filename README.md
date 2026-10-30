@@ -52,7 +52,15 @@ devuelve hasta que la solicitud está contratada (`CONTRACTED`) o en curso (`IN_
 |---|---|
 | `GET /api/services/opportunities?limit=20&cursor=...` | Una página de solicitudes abiertas que el técnico puede atender y a las que aún no se ha postulado |
 
-- Solo `ROLE_PROFESSIONAL`; el técnico sale del token. (Antes de GC-338 la ruta era `/applications/opportunities`; ya no existe.)
+- `ROLE_PROFESSIONAL` y, desde GC-468, `ROLE_COMPANY`; quien consulta sale del token. (Antes de GC-338 la ruta era
+  `/applications/opportunities`; ya no existe.)
+- **Empresas (GC-468).** Una empresa no tiene especialidades ni zona propias: atiende con sus técnicos. Se le piden a
+  ms-users sus técnicos activos (`POST /internal/companies/technicians`) y se le ofrecen las solicitudes a las que la
+  empresa aún no se ha postulado y para las que **al menos uno** de ellos es elegible, con la misma consulta de
+  elegibilidad (una por técnico y lote). Cada elemento trae además `eligibleTechnicianIds`: los técnicos de la empresa
+  que puede proponer en esa solicitud, en el orden en que se asociaron; al postularse escoge uno como `technicianId`.
+  Sin técnicos, la página sale vacía y sin cursor. Si ms-users no responde, 503. Un técnico independiente no recibe el
+  campo.
 - **Compatibilidad en dos pasos.** Aquí se preseleccionan las solicitudes `PUBLISHED` con el momento esperado por
   delante y sin postulación de ese técnico, de la más reciente a la más antigua. Luego se pregunta a ms-users, que es
   quien guarda sus especialidades, zona de atención y disponibilidad, en `POST /internal/technicians/{userId}/eligibility`,
