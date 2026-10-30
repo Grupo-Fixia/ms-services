@@ -30,6 +30,7 @@ class CompanyClientTest {
     private static final String BASE_URL = "http://ms-users:8080";
     private static final String ASSOCIATION = BASE_URL + "/internal/companies/technician-association";
     private static final String PROFILES = BASE_URL + "/internal/companies/public-profiles";
+    private static final String TECHNICIANS = BASE_URL + "/internal/companies/technicians";
     private static final UUID COMPANY = UUID.randomUUID();
     private static final UUID TECHNICIAN = UUID.randomUUID();
 
@@ -80,6 +81,37 @@ class CompanyClientTest {
         server.expect(requestTo(ASSOCIATION)).andRespond(withException(new SocketTimeoutException("timeout")));
         assertThatThrownBy(() -> client.isTechnicianAssociated(COMPANY, TECHNICIAN))
                 .isInstanceOf(EligibilityCheckException.class);
+    }
+
+    // ---------- Técnicos de la empresa ----------
+
+    @Test
+    void consultaLosTecnicosDeLaEmpresaConLaClaveCompartidaSinRepetidos() {
+        UUID other = UUID.randomUUID();
+        server.expect(requestTo(TECHNICIANS))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header("X-Internal-Api-Key", "secreto-interno"))
+                .andExpect(jsonPath("$.companyAdminUserId").value(COMPANY.toString()))
+                .andRespond(withSuccess("{\"technicianUserIds\":[\"" + TECHNICIAN + "\",\"" + other + "\",\""
+                        + TECHNICIAN + "\"]}", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(TECHNICIANS))
+                .andRespond(withSuccess("{\"technicianUserIds\":[]}", MediaType.APPLICATION_JSON));
+
+        assertThat(client.findTechnicians(COMPANY)).containsExactly(TECHNICIAN, other);
+        assertThat(client.findTechnicians(COMPANY)).isEmpty();
+        server.verify();
+    }
+
+    @Test
+    void sinRespuestaValidaNoHayTecnicosDeLaEmpresa() {
+        server.expect(requestTo(TECHNICIANS)).andRespond(withStatus(HttpStatus.SERVICE_UNAVAILABLE));
+        assertThatThrownBy(() -> client.findTechnicians(COMPANY)).isInstanceOf(EligibilityCheckException.class);
+        for (String body : List.of("{}", "{\"technicianUserIds\":null}", "{\"technicianUserIds\":[null]}")) {
+            server.reset();
+            server.expect(requestTo(TECHNICIANS)).andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
+            assertThatThrownBy(() -> client.findTechnicians(COMPANY))
+                    .as(body).isInstanceOf(EligibilityCheckException.class);
+        }
     }
 
     // ---------- Perfiles ----------
