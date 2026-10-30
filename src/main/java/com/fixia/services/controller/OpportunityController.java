@@ -6,6 +6,7 @@ import com.fixia.services.exception.InvalidOpportunityQueryException;
 import com.fixia.services.service.OpportunityCursor;
 import com.fixia.services.service.OpportunityService;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,8 +17,9 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.UUID;
 
 /**
- * Oportunidades compatibles del técnico autenticado (GC-338). Solo rol {@code ROLE_PROFESSIONAL} (ver SecurityConfig).
- * El técnico siempre sale del token, nunca de la ruta ni de los parámetros.
+ * Oportunidades compatibles del técnico autenticado (GC-338) o de la empresa autenticada (GC-468): roles
+ * {@code ROLE_PROFESSIONAL} y {@code ROLE_COMPANY} (ver SecurityConfig). Quien consulta siempre sale del token, nunca de
+ * la ruta ni de los parámetros. A la empresa cada oportunidad le llega con los técnicos suyos que puede proponer.
  */
 @RestController
 @RequestMapping("/api/services/opportunities")
@@ -28,6 +30,8 @@ public class OpportunityController {
 
     /** El claim "sub" de los tokens de ms-users tiene la forma {@code usr_<uuid>}. */
     private static final String SUBJECT_PREFIX = "usr_";
+
+    private static final String COMPANY_ROLE = "ROLE_COMPANY";
 
     private final OpportunityService service;
 
@@ -40,14 +44,32 @@ public class OpportunityController {
      * común da a un identificador mal formado) cuando no se pueden interpretar.
      */
     @GetMapping
-    public OpportunityPageResponse list(@AuthenticationPrincipal Jwt jwt,
+    public OpportunityPageResponse list(@AuthenticationPrincipal Jwt jwt, Authentication authentication,
                                         @RequestParam(required = false) String limit,
                                         @RequestParam(required = false) String cursor) {
         UUID providerId = providerId(jwt);
+        if (isCompany(authentication)) {
+            OpportunityService.CompanyPage page =
+                    service.findCompanyPage(providerId, parseLimit(limit), parseCursor(cursor));
+            return new OpportunityPageResponse(
+                    page.items().stream()
+                            .map(item -> OpportunityResponse.forCompany(item.request(), item.eligibleTechnicianIds()))
+                            .toList(),
+                    encode(page.next()));
+        }
         OpportunityService.Page page = service.findPage(providerId, parseLimit(limit), parseCursor(cursor));
         return new OpportunityPageResponse(
                 page.items().stream().map(OpportunityResponse::from).toList(),
-                page.next() == null ? null : page.next().encode());
+                encode(page.next()));
+    }
+
+    private static String encode(OpportunityCursor next) {
+        return next == null ? null : next.encode();
+    }
+
+    private static boolean isCompany(Authentication authentication) {
+        return authentication.getAuthorities().stream()
+                .anyMatch(authority -> COMPANY_ROLE.equals(authority.getAuthority()));
     }
 
     private static int parseLimit(String limit) {

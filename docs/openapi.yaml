@@ -300,7 +300,7 @@ paths:
 
   /api/services/opportunities:
     get:
-      summary: Consultar mis oportunidades compatibles (GC-337, GC-338)
+      summary: Consultar mis oportunidades compatibles (GC-337, GC-338; empresas GC-468)
       description: |
         Una página de solicitudes abiertas (`PUBLISHED` y con el momento esperado por delante) que el técnico puede
         atender y a las que aún no se ha postulado, la más reciente primero. La compatibilidad (categoría, zona de
@@ -313,6 +313,11 @@ paths:
 
         Solo incluye la ubicación aproximada; no incluye al cliente, la dirección exacta ni las fotos. Si ms-users no
         responde, 503 y no se devuelve nada.
+
+        **Empresas (`ROLE_COMPANY`, GC-468).** Se ofrecen las solicitudes a las que la empresa aún no se ha postulado
+        y para las que al menos uno de sus técnicos activos es elegible. Cada elemento trae `eligibleTechnicianIds`:
+        los técnicos que la empresa puede proponer como `technicianId` al postularse. Sin técnicos, página vacía y sin
+        cursor.
       security:
         - bearerAuth: []
       parameters:
@@ -1140,7 +1145,7 @@ components:
 
     Opportunity:
       type: object
-      description: Solicitud compatible con el técnico. Solo ubicación aproximada.
+      description: Solicitud compatible con el técnico o con algún técnico de la empresa. Solo ubicación aproximada.
       properties:
         id: { type: string, format: uuid }
         category: { $ref: '#/components/schemas/ServiceCategory' }
@@ -1157,6 +1162,12 @@ components:
           example: 200000.00
         budgetCurrency: { type: string, nullable: true, enum: [COP] }
         publishedAt: { type: string, format: date-time }
+        eligibleTechnicianIds:
+          type: array
+          items: { type: string, format: uuid }
+          description: |
+            Solo para una empresa (GC-468): sus técnicos elegibles para esta solicitud, en el orden en que se
+            asociaron; nunca vacío. Uno de ellos va como `technicianId` al postularse. Un técnico no recibe el campo.
 
     QuotationStatus:
       type: string

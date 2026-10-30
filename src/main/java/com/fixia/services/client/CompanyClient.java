@@ -42,6 +42,12 @@ public class CompanyClient {
     record ProfilesAnswer(List<CompanyProfile> profiles) {
     }
 
+    record TechniciansQuery(UUID companyAdminUserId) {
+    }
+
+    record TechniciansAnswer(List<UUID> technicianUserIds) {
+    }
+
     private final RestClient restClient;
     private final UsersClientProperties properties;
 
@@ -74,6 +80,32 @@ public class CompanyClient {
             throw new EligibilityCheckException("ms-users respondió sin la asociación del técnico");
         }
         return answer.associated();
+    }
+
+    /**
+     * Técnicos activos de la empresa de esa cuenta, en el orden en que se asociaron. ms-users responde lista vacía si
+     * la cuenta no es de una empresa activa, igual que para una empresa sin técnicos.
+     *
+     * @throws EligibilityCheckException si no se pudo obtener una respuesta válida: sin ella no se ofrecen
+     *                                   oportunidades (falla cerrado, igual que la elegibilidad)
+     */
+    public List<UUID> findTechnicians(UUID companyAdminUserId) {
+        TechniciansAnswer answer;
+        try {
+            answer = restClient.post()
+                    .uri("/internal/companies/technicians")
+                    .header(TechnicianEligibilityClient.API_KEY_HEADER, apiKey())
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .body(new TechniciansQuery(companyAdminUserId))
+                    .retrieve()
+                    .body(TechniciansAnswer.class);
+        } catch (RestClientException e) {
+            throw new EligibilityCheckException("ms-users no pudo entregar los técnicos de la empresa", e);
+        }
+        if (answer == null || answer.technicianUserIds() == null || answer.technicianUserIds().contains(null)) {
+            throw new EligibilityCheckException("ms-users respondió sin los técnicos de la empresa");
+        }
+        return List.copyOf(new LinkedHashSet<>(answer.technicianUserIds()));
     }
 
     /**

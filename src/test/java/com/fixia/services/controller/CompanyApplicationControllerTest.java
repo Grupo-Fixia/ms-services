@@ -48,6 +48,7 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -64,8 +65,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
- * Postulación y selección empresarial (GC-468, historia GC-465, CA-33): una empresa se postula una vez por solicitud
- * con un técnico propio y un precio; el cliente la ve como empresa con su ejecutor y la selecciona por la ruta normal.
+ * Postulación y selección empresarial (GC-468, historia GC-465, CA-33): una empresa ve las solicitudes que sus técnicos
+ * pueden atender, se postula una vez por solicitud con un técnico propio y un precio; el cliente la ve como empresa con
+ * su ejecutor y la selecciona por la ruta normal.
  * La asociación, la elegibilidad y los perfiles de ms-users se simulan con dobles.
  */
 @SpringBootTest
@@ -74,6 +76,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class CompanyApplicationControllerTest {
 
     private static final String APPLICATIONS = "/api/services/applications";
+    private static final String OPPORTUNITIES = "/api/services/opportunities";
     private static final UUID CLIENT = UUID.randomUUID();
     private static final UUID COMPANY = UUID.randomUUID();
     private static final UUID OTHER_COMPANY = UUID.randomUUID();
@@ -407,6 +410,85 @@ class CompanyApplicationControllerTest {
                 .andExpect(jsonPath("$.title").value("Perfiles no disponibles"));
     }
 
+    // ---------- Oportunidades de la empresa ----------
+
+    /** ms-users: CARLOS puede atender las solicitudes indicadas y ANA ninguna. */
+    private void carlosEligibleFor(UUID... requestIds) {
+        List<UUID> eligible = List.of(requestIds);
+        when(companyClient.findTechnicians(COMPANY)).thenReturn(List.of(CARLOS, ANA));
+        when(eligibilityClient.checkAll(any(), any())).thenAnswer(call -> {
+            UUID technician = call.getArgument(0);
+            List<ServiceRequest> asked = call.getArgument(1);
+            Map<UUID, TechnicianEligibilityClient.Result> results = new LinkedHashMap<>();
+            for (ServiceRequest candidate : asked) {
+                boolean ok = technician.equals(CARLOS) && eligible.contains(candidate.getId());
+                results.put(candidate.getId(), new TechnicianEligibilityClient.Result(candidate.getId(), ok,
+                        ok ? List.of() : List.of("CATEGORY")));
+            }
+            return results;
+        });
+    }
+
+    @Test
+    void laEmpresaVeLaSolicitudConLosTecnicosQuePuedeProponerYSePostulaConUno() throws Exception {
+        ServiceRequest request = publishedRequest();
+        publishedRequest();
+        carlosEligibleFor(request.getId());
+
+        mockMvc.perform(get(OPPORTUNITIES).with(as(COMPANY, "ROLE_COMPANY")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].id", contains(request.getId().toString())))
+                .andExpect(jsonPath("$.items[0].eligibleTechnicianIds", contains(CARLOS.toString())))
+                .andExpect(jsonPath("$.items[0].budgetAmount").value(200000.0))
+                .andExpect(jsonPath("$.nextCursor").value(nullValue()));
+        verify(eligibilityClient, never()).checkAll(eq(COMPANY), any());
+
+        applyAsCompany(COMPANY, request.getId(), CARLOS, 180000).andExpect(status().isCreated());
+
+        // Ya postulada, deja de ofrecérsele; la otra sigue sin técnico elegible.
+        mockMvc.perform(get(OPPORTUNITIES).with(as(COMPANY, "ROLE_COMPANY")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", empty()));
+    }
+
+    @Test
+    void elTecnicoIndependienteNoRecibeTecnicosElegibles() throws Exception {
+        ServiceRequest request = publishedRequest();
+        when(eligibilityClient.checkAll(any(), any())).thenAnswer(call -> {
+            List<ServiceRequest> asked = call.getArgument(1);
+            return asked.stream().collect(Collectors.toMap(ServiceRequest::getId,
+                    candidate -> new TechnicianEligibilityClient.Result(candidate.getId(), true, List.of())));
+        });
+
+        mockMvc.perform(get(OPPORTUNITIES).with(as(INDEPENDENT, "ROLE_PROFESSIONAL")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[*].id", contains(request.getId().toString())))
+                .andExpect(jsonPath("$.items[0].eligibleTechnicianIds").doesNotExist());
+        verifyNoInteractions(companyClient);
+    }
+
+    @Test
+    void unaEmpresaSinTecnicosNoVeOportunidades() throws Exception {
+        publishedRequest();
+        when(companyClient.findTechnicians(COMPANY)).thenReturn(List.of());
+
+        mockMvc.perform(get(OPPORTUNITIES).with(as(COMPANY, "ROLE_COMPANY")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", empty()))
+                .andExpect(jsonPath("$.nextCursor").value(nullValue()));
+        verify(eligibilityClient, never()).checkAll(any(), any());
+    }
+
+    @Test
+    void siMsUsersNoEntregaLosTecnicosDeLaEmpresaResponde503() throws Exception {
+        publishedRequest();
+        doThrow(new EligibilityCheckException("ms-users caído")).when(companyClient).findTechnicians(COMPANY);
+
+        mockMvc.perform(get(OPPORTUNITIES).with(as(COMPANY, "ROLE_COMPANY")))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.items").doesNotExist());
+    }
+
     // ---------- Después de seleccionar y por rol ----------
 
     @Test
@@ -434,13 +516,13 @@ class CompanyApplicationControllerTest {
     }
 
     @Test
-    void elClienteNoSePostulaYLaEmpresaNoUsaRutasDelClienteNiDelTecnico() throws Exception {
+    void elClienteNoSePostulaNiVeOportunidadesYLaEmpresaNoUsaRutasDelClienteNiDelContrato() throws Exception {
         ServiceRequest request = publishedRequest();
 
         apply(CLIENT, "ROLE_CLIENT", request.getId(), null, 150000).andExpect(status().isForbidden());
-        mockMvc.perform(get("/api/services/requests").with(as(COMPANY, "ROLE_COMPANY")))
+        mockMvc.perform(get(OPPORTUNITIES).with(as(CLIENT, "ROLE_CLIENT")))
                 .andExpect(status().isForbidden());
-        mockMvc.perform(get("/api/services/opportunities").with(as(COMPANY, "ROLE_COMPANY")))
+        mockMvc.perform(get("/api/services/requests").with(as(COMPANY, "ROLE_COMPANY")))
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/services/contracts").with(as(COMPANY, "ROLE_COMPANY")))
                 .andExpect(status().isForbidden());
