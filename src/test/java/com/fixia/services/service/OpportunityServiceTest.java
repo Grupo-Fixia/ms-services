@@ -1,5 +1,6 @@
 package com.fixia.services.service;
 
+import com.fixia.services.client.CompanyClient;
 import com.fixia.services.client.EligibilityCheckException;
 import com.fixia.services.client.TechnicianEligibilityClient;
 import com.fixia.services.domain.ApproximateLocation;
@@ -33,6 +34,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -48,8 +50,9 @@ class OpportunityServiceTest {
 
     private final ServiceRequestRepository repository = mock(ServiceRequestRepository.class);
     private final TechnicianEligibilityClient eligibilityClient = mock(TechnicianEligibilityClient.class);
-    private final OpportunityService service =
-            new OpportunityService(repository, eligibilityClient, Clock.fixed(NOW, ZoneOffset.UTC));
+    private final CompanyClient companyClient = mock(CompanyClient.class);
+    private final OpportunityService service = new OpportunityService(repository, eligibilityClient, companyClient,
+            Clock.fixed(NOW, ZoneOffset.UTC));
 
     /** Solicitud número {@code index}: más pequeño = más reciente. */
     private static ServiceRequest request(int index) {
@@ -87,7 +90,11 @@ class OpportunityServiceTest {
 
     /** ms-users responde elegible solo para las solicitudes indicadas. */
     private void eligibleOnly(Set<UUID> eligibleIds) {
-        when(eligibilityClient.checkAll(eq(PROVIDER), any())).thenAnswer(call -> {
+        eligibleOnly(PROVIDER, eligibleIds);
+    }
+
+    private void eligibleOnly(UUID technician, Set<UUID> eligibleIds) {
+        when(eligibilityClient.checkAll(eq(technician), any())).thenAnswer(call -> {
             List<ServiceRequest> asked = call.getArgument(1);
             Map<UUID, TechnicianEligibilityClient.Result> results = new HashMap<>();
             for (ServiceRequest candidate : asked) {
@@ -256,6 +263,82 @@ class OpportunityServiceTest {
         when(eligibilityClient.checkAll(eq(PROVIDER), any())).thenThrow(new EligibilityCheckException("caído"));
 
         assertThatThrownBy(() -> service.findPage(PROVIDER, 20, null)).isInstanceOf(EligibilityCheckException.class);
+    }
+
+    // ---------- Empresas (GC-468): PROVIDER es la cuenta de la empresa ----------
+
+    private static final UUID TECHNICIAN_A = UUID.randomUUID();
+    private static final UUID TECHNICIAN_B = UUID.randomUUID();
+
+    @Test
+    void laEmpresaVeLasSolicitudesQueAlgunoDeSusTecnicosPuedeAtenderConEsosTecnicos() {
+        List<ServiceRequest> all = requests(5);
+        candidates(all);
+        when(companyClient.findTechnicians(PROVIDER)).thenReturn(List.of(TECHNICIAN_A, TECHNICIAN_B));
+        eligibleOnly(TECHNICIAN_A, ids(all, 1, 2));
+        eligibleOnly(TECHNICIAN_B, ids(all, 2, 4));
+
+        OpportunityService.CompanyPage page = service.findCompanyPage(PROVIDER, 20, null);
+
+        assertThat(page.items()).extracting(OpportunityService.CompanyOpportunity::request)
+                .containsExactly(all.get(1), all.get(2), all.get(4));
+        assertThat(page.items()).extracting(OpportunityService.CompanyOpportunity::eligibleTechnicianIds)
+                .containsExactly(List.of(TECHNICIAN_A), List.of(TECHNICIAN_A, TECHNICIAN_B), List.of(TECHNICIAN_B));
+        assertThat(page.next()).isNull();
+        // Una consulta por técnico y lote; nunca se evalúa a la empresa como si fuera un técnico.
+        verify(eligibilityClient, times(1)).checkAll(eq(TECHNICIAN_A), any());
+        verify(eligibilityClient, times(1)).checkAll(eq(TECHNICIAN_B), any());
+        verify(eligibilityClient, never()).checkAll(eq(PROVIDER), any());
+    }
+
+    @Test
+    void unaEmpresaSinTecnicosNoVeOportunidadesNiRevisaCandidatas() {
+        when(companyClient.findTechnicians(PROVIDER)).thenReturn(List.of());
+
+        OpportunityService.CompanyPage page = service.findCompanyPage(PROVIDER, 20, null);
+
+        assertThat(page.items()).isEmpty();
+        assertThat(page.next()).isNull();
+        verifyNoInteractions(repository, eligibilityClient);
+    }
+
+    @Test
+    void lasOportunidadesDeLaEmpresaSePaginanPorCursorSinRepetir() {
+        List<ServiceRequest> all = requests(6);
+        candidates(all);
+        when(companyClient.findTechnicians(PROVIDER)).thenReturn(List.of(TECHNICIAN_A, TECHNICIAN_B));
+        eligibleOnly(TECHNICIAN_A, ids(all, 0, 3));
+        eligibleOnly(TECHNICIAN_B, ids(all, 5));
+
+        OpportunityService.CompanyPage first = service.findCompanyPage(PROVIDER, 2, null);
+        OpportunityService.CompanyPage second = service.findCompanyPage(PROVIDER, 2, first.next());
+
+        assertThat(first.items()).extracting(OpportunityService.CompanyOpportunity::request)
+                .containsExactly(all.get(0), all.get(3));
+        assertThat(first.next()).isEqualTo(OpportunityCursor.of(all.get(3)));
+        assertThat(second.items()).extracting(OpportunityService.CompanyOpportunity::request)
+                .containsExactly(all.get(5));
+        assertThat(second.next()).isNull();
+    }
+
+    @Test
+    void siMsUsersNoEntregaLosTecnicosDeLaEmpresaNoDevuelveNada() {
+        when(companyClient.findTechnicians(PROVIDER)).thenThrow(new EligibilityCheckException("caído"));
+
+        assertThatThrownBy(() -> service.findCompanyPage(PROVIDER, 20, null))
+                .isInstanceOf(EligibilityCheckException.class);
+        verifyNoInteractions(repository, eligibilityClient);
+    }
+
+    @Test
+    void siFallaLaElegibilidadDeUnTecnicoDeLaEmpresaNoDevuelveNada() {
+        candidates(requests(3));
+        when(companyClient.findTechnicians(PROVIDER)).thenReturn(List.of(TECHNICIAN_A, TECHNICIAN_B));
+        eligibleOnly(TECHNICIAN_A, Set.of());
+        when(eligibilityClient.checkAll(eq(TECHNICIAN_B), any())).thenThrow(new EligibilityCheckException("caído"));
+
+        assertThatThrownBy(() -> service.findCompanyPage(PROVIDER, 20, null))
+                .isInstanceOf(EligibilityCheckException.class);
     }
 
     @Test
