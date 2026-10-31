@@ -236,7 +236,8 @@ y el evento en `ms-users/docs/events`. Resumen:
   dirección y el evaluado se deducen del token y de la participación.
 - **Respuestas:** 201 creada; repetida igual, 200 con la existente y sin otro evento; otra distinta, 409; tercero o
   servicio inexistente, 404; 422 con `SERVICE_NOT_CLOSED`, `COMPANY_SERVICE_NOT_EVALUABLE` o
-  `EVALUATION_WINDOW_EXPIRED` (plazo de 2 días desde el cierre, configurable); ms-services caído, 503.
+  `EVALUATION_WINDOW_EXPIRED` (plazo de 2 días desde el cierre, configurable) o `EVALUATED_USER_NOT_FOUND`;
+  ms-services caído, 503. ✅ Implementado en GC-444.
 - **Consultar:** `GET /api/users/evaluations?serviceRequestIds=a,b` (1 a 50): las evaluaciones de esos servicios en las
   que quien consulta es evaluador o evaluado. Sirve al detalle de un servicio y al historial (sección 9).
 - **Evento:** `evaluacion.registrada` (v1) por el Outbox **propio de ms-users** (mismas columnas que el de
