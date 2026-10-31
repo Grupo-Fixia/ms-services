@@ -100,7 +100,8 @@ class HistoryControllerTest {
 
     /** Contratación sembrada con la fecha de contratación indicada y sin historial de transiciones (servicio antiguo). */
     private ServiceContract contracted(UUID clientId, UUID providerId, Instant contractedAt) {
-        Instant now = Instant.now();
+        // la base guarda microsegundos; Instant.now() en Linux trae nanosegundos y lo leído no coincidiría con lo guardado
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
         ServiceRequest request = ServiceRequest.publish(clientId, ServiceCategory.PLUMBING, "Fuga de agua en el baño",
                 new ApproximateLocation("Bogotá", "Chapinero", 4.6512, -74.0583), new ExactLocation(ADDRESS, 4.65, -74.08),
                 now.plus(Duration.ofDays(5)), new BigDecimal("200000"), CurrencyCode.COP, List.of(), now);
