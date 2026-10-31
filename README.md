@@ -33,6 +33,18 @@ y la clave interna nunca se guardan en el repositorio.
 - Roles: las rutas `/api/services/requests/**` exigen `ROLE_CLIENT`; un técnico recibe 403.
 - Todas las respuestas 401 son idénticas y no indican el motivo.
 
+## Ruta interna de participación (GC-444)
+
+`GET /internal/services/{serviceRequestId}/participation` responde `{serviceRequestId, status, clientId, providerId,
+providerType, closedAt}`: quién participó y cuándo se cerró. La usa ms-users para verificar una evaluación sin leer esta
+base (contrato de GC-443). `providerId` y `providerType` son `null` sin prestador seleccionado; `closedAt` sale del
+historial de transiciones y es `null` si la solicitud no está cerrada. 404 si no existe. No trae dirección, precio ni
+descripción, y no se cachea.
+
+Es la primera ruta `/internal/**` de este servicio: tiene su propia cadena de seguridad (`InternalSecurityConfig`), de
+mayor prioridad que la de usuarios, que solo acepta la cabecera `X-Internal-Api-Key` con la misma `INTERNAL_API_KEY`
+con la que este servicio llama a ms-users. Un token de usuario no sirve ahí. Traefik y el Ingress no la exponen.
+
 ## API (GC-333)
 
 Contrato completo en [`docs/openapi.yaml`](docs/openapi.yaml).
