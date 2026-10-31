@@ -518,6 +518,60 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/services/history:
+    get:
+      summary: Mi historial de servicios contratados (GC-448)
+      description: |
+        `ROLE_CLIENT` y `ROLE_PROFESSIONAL`. Los servicios **contratados** en que participó quien consulta (como cliente
+        dueño o como prestador contratado), del más reciente al más antiguo según `contractedAt`. Las solicitudes que
+        nunca llegaron a contratarse no aparecen: siguen en `GET /api/services/requests`. Quien consulta y su rol salen
+        del token; nadie ve los servicios de otro, y sin servicios la respuesta es una página vacía (no un 404).
+
+        Paginación por cursor: se pide la siguiente página con el `nextCursor` de la anterior, hasta que sea `null`.
+        El orden es estable (`contractedAt` y `id`), así que nada se repite ni se salta aunque se contraten servicios
+        nuevos entre una página y otra.
+
+        Cada elemento es un resumen. El detalle (con `timeline`) es `GET /api/services/contracts/{contractId}` para el
+        prestador y `GET /api/services/requests/{serviceRequestId}/contract` para el cliente. No trae la dirección
+        exacta, datos de contacto, el motivo de una objeción ni evaluaciones: estas últimas las guarda ms-users y el
+        frontend las pide allí. Las fechas del ciclo (`startedAt`, `finishedAt`, `closedAt`, `lastTransitionAt`) salen
+        del historial de transiciones y son `null` cuando no existen o el servicio es anterior a él: no se inventan.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: Servicios que se piden como máximo en la página.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+        - name: cursor
+          in: query
+          required: false
+          description: El `nextCursor` de la página anterior. Es opaco, no se debe construir ni interpretar.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Una página del historial (puede estar vacía).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryPage'
+        '400':
+          description: El límite o el cursor no son válidos.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/services/contracts:
     get:
       summary: Mis contrataciones como prestador (GC-359)
@@ -841,8 +895,40 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
 
+  /internal/services/{serviceRequestId}/participation:
+    get:
+      summary: Participación y cierre de una solicitud (GC-444, interna)
+      description: |
+        Ruta interna para ms-users, que verifica con ella una evaluación sin leer esta base (contrato de GC-443). Solo
+        con `X-Internal-Api-Key`; un token de usuario no sirve. No la exponen Traefik ni el Ingress. No se debe cachear.
+      security:
+        - internalApiKey: []
+      parameters:
+        - name: serviceRequestId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Quién participó y cuándo se cerró. Sin dirección, precio ni descripción.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Participation'
+        '401':
+          description: Sin clave interna o con una clave equivocada.
+        '404':
+          $ref: '#/components/responses/NotFound'
+
 components:
   securitySchemes:
+    internalApiKey:
+      type: apiKey
+      in: header
+      name: X-Internal-Api-Key
+      description: |
+        Clave compartida entre microservicios (`INTERNAL_API_KEY`, la misma con la que ms-services llama a ms-users).
+        Solo para `/internal/**` (GC-444).
     bearerAuth:
       type: http
       scheme: bearer
@@ -1021,6 +1107,16 @@ components:
         publishedAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
 
+    Participation:
+      type: object
+      properties:
+        serviceRequestId: { type: string, format: uuid }
+        status: { $ref: '#/components/schemas/ServiceRequestStatus' }
+        clientId: { type: string, format: uuid }
+        providerId: { type: string, format: uuid, nullable: true, description: 'Prestador seleccionado; null si aún no hay.' }
+        providerType: { type: string, enum: [INDEPENDENT, COMPANY], nullable: true }
+        closedAt: { type: string, format: date-time, nullable: true, description: 'Paso a CLOSED según el historial; null si no está cerrada.' }
+
     ApplicationStatus:
       type: string
       enum: [APPLIED, SELECTED, REJECTED]
@@ -1090,6 +1186,46 @@ components:
           type: string
           nullable: true
           description: Cursor para pedir la siguiente página; `null` si no quedan más candidatas.
+
+    HistoryPage:
+      type: object
+      required: [items, nextCursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryItem'
+        nextCursor:
+          type: string
+          nullable: true
+          description: Cursor para pedir la siguiente página; `null` si no quedan más servicios.
+
+    HistoryItem:
+      type: object
+      description: |
+        Un servicio contratado del historial propio (GC-448). `budgetAmount` (presupuesto orientativo del cliente) y
+        `contractedAmount` (lo acordado) son datos distintos. Las fechas de ejecución son `null` si el servicio aún no
+        llegó a esa etapa o es anterior al historial de transiciones.
+      required: [serviceRequestId, contractId, role, counterpartId, category, status, contractedAmount, currency, agreedAt, contractedAt]
+      properties:
+        serviceRequestId: { type: string, format: uuid, description: Solicitud del servicio; con ella el cliente pide el detalle. }
+        contractId: { type: string, format: uuid, description: Contratación; con ella el prestador pide el detalle. }
+        role:
+          type: string
+          enum: [CLIENT, PROFESSIONAL]
+          description: Cómo participó quien consulta.
+        counterpartId: { type: string, format: uuid, description: El prestador si quien consulta es el cliente; el cliente si es el prestador. }
+        category: { $ref: '#/components/schemas/ServiceCategory' }
+        status: { $ref: '#/components/schemas/ServiceRequestStatus' }
+        budgetAmount: { type: number, nullable: true, description: Presupuesto orientativo del cliente; `null` en solicitudes anteriores a él. }
+        contractedAmount: { type: number, description: Importe acordado en la contratación. }
+        currency: { type: string, enum: [COP] }
+        agreedAt: { type: string, format: date-time, description: Fecha acordada para ejecutar el servicio. }
+        contractedAt: { type: string, format: date-time }
+        startedAt: { type: string, format: date-time, nullable: true, description: La primera vez que el servicio pasó a ejecución. }
+        finishedAt: { type: string, format: date-time, nullable: true, description: La declaración de fin del técnico que sigue vigente; `null` si el cliente la objetó y volvió a ejecución. }
+        closedAt: { type: string, format: date-time, nullable: true }
+        lastTransitionAt: { type: string, format: date-time, nullable: true, description: El último cambio de estado registrado. }
 
     Applicant:
       type: object

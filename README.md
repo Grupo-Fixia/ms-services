@@ -33,6 +33,18 @@ y la clave interna nunca se guardan en el repositorio.
 - Roles: las rutas `/api/services/requests/**` exigen `ROLE_CLIENT`; un técnico recibe 403.
 - Todas las respuestas 401 son idénticas y no indican el motivo.
 
+## Ruta interna de participación (GC-444)
+
+`GET /internal/services/{serviceRequestId}/participation` responde `{serviceRequestId, status, clientId, providerId,
+providerType, closedAt}`: quién participó y cuándo se cerró. La usa ms-users para verificar una evaluación sin leer esta
+base (contrato de GC-443). `providerId` y `providerType` son `null` sin prestador seleccionado; `closedAt` sale del
+historial de transiciones y es `null` si la solicitud no está cerrada. 404 si no existe. No trae dirección, precio ni
+descripción, y no se cachea.
+
+Es la primera ruta `/internal/**` de este servicio: tiene su propia cadena de seguridad (`InternalSecurityConfig`), de
+mayor prioridad que la de usuarios, que solo acepta la cabecera `X-Internal-Api-Key` con la misma `INTERNAL_API_KEY`
+con la que este servicio llama a ms-users. Un token de usuario no sirve ahí. Traefik y el Ingress no la exponen.
+
 ## API (GC-333)
 
 Contrato completo en [`docs/openapi.yaml`](docs/openapi.yaml).
@@ -403,6 +415,49 @@ El técnico y el cliente toman decisiones distintas y auditables; no hay cierre 
 - **Respuesta.** Las tres devuelven la misma `Contract` que `GET /requests/{id}/contract`, con `serviceStatus` y `timeline`.
 - **Migración V10:** amplía las restricciones de estado de `service_requests`; no hay columnas nuevas (quién, cuándo y el motivo
   los guarda `service_request_transitions`). La dirección exacta se sigue entregando hasta `CLOSED` y después.
+
+## Historial propio (GC-448)
+
+`GET /api/services/history?limit=20&cursor=...` (`ROLE_CLIENT` y `ROLE_PROFESSIONAL`): los servicios **contratados** en que
+participó quien consulta, del más reciente al más antiguo, con paginación por cursor (`limit` de 1 a 50, 20 por defecto; un
+valor inválido es 400). Quien consulta y su rol salen del token; sin servicios, página vacía. `ROLE_COMPANY` recibe 403.
+
+```json
+{
+  "items": [
+    {
+      "serviceRequestId": "5a0f6e1e-0c0e-4d7e-9a58-3d2b3f2c9a10",
+      "contractId": "9d3a41c2-77a1-4f2e-8d44-0b1a6e2f55c3",
+      "role": "CLIENT",
+      "counterpartId": "7ec00000-0000-4000-8000-000000000001",
+      "category": "PLUMBING",
+      "status": "IN_PROGRESS",
+      "budgetAmount": 200000.00,
+      "contractedAmount": 105000.00,
+      "currency": "COP",
+      "agreedAt": "2026-11-02T15:00:00Z",
+      "contractedAt": "2026-10-30T14:00:00Z",
+      "startedAt": "2026-10-31T09:30:00Z",
+      "finishedAt": null,
+      "closedAt": null,
+      "lastTransitionAt": "2026-10-31T09:30:00Z"
+    }
+  ],
+  "nextCursor": null
+}
+```
+
+- `role` es cómo participó quien consulta y `counterpartId` la otra parte (el prestador para el cliente, el cliente para el
+  prestador). El detalle es el que ya existe: `GET /contracts/{contractId}` (prestador) y `GET /requests/{serviceRequestId}/contract`
+  (cliente); el elemento trae ambos identificadores.
+- Es un resumen: no lleva la dirección exacta, datos de contacto, el motivo de una objeción ni evaluaciones (viven en ms-users;
+  el frontend las pide allí con `serviceRequestId`).
+- `budgetAmount` (presupuesto orientativo) y `contractedAmount` (lo acordado) son datos distintos. Las fechas de ejecución salen
+  del historial de transiciones y son `null` si el servicio aún no llegó a esa etapa o es anterior a él; `finishedAt` es la
+  declaración de fin que sigue vigente, así que vuelve a `null` si el cliente objeta y el servicio retoma la ejecución.
+- `nextCursor` es opaco; se pide la siguiente página con él hasta que sea `null`. El orden es estable (`contractedAt` e `id`):
+  nada se repite ni se salta si se contratan servicios nuevos entre páginas.
+- **Migración V13:** índice `ix_service_contracts_client` para listar por cliente (el del prestador ya existía desde V5).
 
 ## Eventos de negocio (GC-436)
 

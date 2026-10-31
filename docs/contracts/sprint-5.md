@@ -22,7 +22,7 @@ tareas del Sprint 5 en Jira.
 | --- | --- |
 | Identidad | El actor sale siempre del token: `sub` = `usr_<users.id>` y `roles` = `ROLE_CLIENT`, `ROLE_PROFESSIONAL`, `ROLE_ADMIN` (y `ROLE_COMPANY`, sección 8). Nunca se confía en un id de usuario del cuerpo |
 | Referencias entre servicios | Siempre `users.id` de ms-users (UUID), sin clave foránea entre bases (Database per Service) |
-| Rutas por rol en ms-services | `/api/services/requests/**` cliente; `/applications/**` y `/opportunities/**` técnico y empresa (GC-468); `/quotations/**`, `/contracts/**` técnico. Las rutas internas van bajo `/internal/**` con `X-Internal-Api-Key` y no pasan por el gateway |
+| Rutas por rol en ms-services | `/api/services/requests/**` cliente; `/applications/**` y `/opportunities/**` técnico y empresa (GC-468); `/quotations/**`, `/contracts/**` técnico; `/history` cliente y técnico (GC-448). Las rutas internas van bajo `/internal/**` con `X-Internal-Api-Key` y no pasan por el gateway |
 | Dinero en la API | Dos campos planos: el importe (`proposedAmount`, `amount`, `budgetAmount`…) como número con hasta 2 decimales, mayor que 0 y máximo 9999999999.99, y su moneda (`currency`, solo `COP`) |
 | Dinero en eventos | Texto decimal con 2 decimales (`"150000.00"`), ver GC-436 |
 | Fechas | ISO-8601 en UTC con `Z`. El reloj del servicio tiene precisión de microsegundos, igual que la base |
@@ -47,7 +47,7 @@ tareas del Sprint 5 en Jira.
 | Identidad de empresa y asociación empresa–técnico | ms-users | 🟡 | GC-466 |
 | Evaluaciones bidireccionales y su Outbox | ms-users | 🟡 | GC-443, GC-444 |
 | Reputación calculada de las evaluaciones | ms-users | 🟡 | GC-446 |
-| Historial propio | ms-services | 🟡 | GC-448 |
+| Historial propio (índice `ix_service_contracts_client`) | ms-services | ✅ V13 | GC-448 |
 
 ## 3. Los cuatro valores económicos (RN-004, RD-08)
 
@@ -169,6 +169,38 @@ mismo instante y en la misma transacción que el cambio de estado y el evento.
 - `serviceRequest.exactLocation` sigue llegando solo al prestador contratado (ADR-009) y al cliente dueño, también con el
   servicio en curso (`ServiceRequestStatus#exposesExactLocation()`; GC-441 agrega ahí las etapas siguientes).
 
+### 5.4 Contratación: contrato HTTP verificado (✅ GC-430)
+
+Auditoría de la aceptación/rechazo y la formalización (GC-358/359) contra PostgreSQL 16 real y por la API pública, con
+usuarios reales de ms-users. No hubo defectos: el comportamiento ya era el de esta tabla y ahora lo fijan las pruebas
+(`ContractRulesTest`).
+
+| Operación | 200 | 401 | 403 | 404 | 409 |
+| --- | --- | --- | --- | --- | --- |
+| `POST /requests/{id}/quotations/{qid}/acceptance` (cliente) | Aceptada; contrato creado. Repetir devuelve lo mismo | Sin token | Rol distinto de cliente (el prestador no responde) | Solicitud ajena o inexistente, cotización de otra solicitud o inexistente, identificador mal formado | Rechazada, reemplazada, vencida o respondida de otra forma; la solicitud ya no tiene prestador vigente; ya hay otra aceptada |
+| `POST /requests/{id}/quotations/{qid}/rejection` (cliente) | Rechazada. Repetir devuelve lo mismo | Sin token | Rol distinto de cliente | Igual que la aceptación | Aceptada, reemplazada, vencida o la solicitud ya contratada |
+| `GET /requests/{id}/contract` (cliente) | La contratación | Sin token | Rol distinto de cliente | Solicitud ajena o aún sin contratar | — |
+| `GET /contracts/{contractId}` (prestador) | La contratación | Sin token | Rol distinto de prestador | Contrato ajeno o inexistente | — |
+
+Reglas comprobadas:
+
+- **Un contrato por solicitud y por cotización**, creado en la misma transacción que la aceptación. Aceptar de nuevo — incluso
+  con el servicio ya `IN_PROGRESS`, `TECHNICIAN_FINISHED` o `CLOSED` — responde 200 con la cotización `ACCEPTED` y no cambia el
+  contrato, el estado, el historial ni el Outbox: sigue habiendo un solo `servicio.contratado` y una sola transición
+  `CONTRACTED`.
+- **El contrato copia la versión realmente aceptada** (`quotationId`, importe, alcance, condiciones y fecha acordada). Con
+  varias versiones solo la vigente (`SENT`, `current: true`) se acepta; una reemplazada o rechazada da 409 y no crea contrato.
+  Tras aceptar ninguna versión queda `current`.
+- **Concurrencia (PostgreSQL):** 20 aceptaciones simultáneas dejan un contrato y todas responden 200; aceptar a la vez que
+  rechazar deja un solo resultado coherente (la aceptada con un contrato, o la rechazada sin contrato) y aceptar a la vez que
+  se envía una cotización nueva nunca deja un contrato junto a una cotización `SENT`.
+- **Vigencia:** una cotización vencida da 409 al aceptarla o rechazarla y sigue `SENT` con `expired: true`.
+- El contrato sobrevive al reinicio del servicio.
+- **Forma del JSON que consume Flutter** (`http_contract_repository.dart`): `id`, `serviceRequestId`, `quotationId`,
+  `clientId`, `providerId`, `amount` (número), `currency`, `scope`, `conditions`, `agreedAt`, `contractedAt` y
+  `serviceRequest` con `category`, `description`, `approximateLocation.{city, zone}`, `exactLocation.address` y `expectedAt`;
+  además `serviceStatus` y `timeline` (GC-437). Sin datos de contacto ni de pago.
+
 ## 6. Evidencias (🟡 GC-439, GC-440; almacenamiento GC-456)
 
 - **Dónde:** archivo en un bucket **privado** de RustFS (`evidences`, lo crea GC-456); metadatos en la tabla
@@ -186,36 +218,39 @@ mismo instante y en la misma transacción que el cambio de estado y el evento.
 - ❓ **Límites** (propuesta): JPEG, PNG, WebP y PDF; máximo 10 MB por archivo y 10 por servicio. Confirman GC-439,
   GC-440 (Andrés) y GC-456 (Juan Pablo).
 
-## 7. Evaluaciones y reputación (🟡 GC-443, GC-444, GC-446)
+## 7. Evaluaciones y reputación (✅ contrato GC-443 / 🟡 GC-444, GC-446)
 
-`ms-users` es la fuente de verdad de las evaluaciones (decisión del equipo, SRS V6 §6.10). GC-443 (spike de Juan
-Pablo) confirma o ajusta lo siguiente.
+✅ **Contrato definido por GC-443** (Tomás O., que tomó el spike; GC-446 pasó a Juan Pablo):
+[`ms-users/docs/contracts/evaluaciones.md`](https://github.com/Grupo-Fixia/ms-users/blob/develop/docs/contracts/evaluaciones.md)
+y el evento en `ms-users/docs/events`. Resumen:
 
-### 7.1 Evaluación (ms-users)
+### 7.1 Evaluación (ms-users, GC-444)
 
-- **Tabla `service_evaluations`:** `id`, `service_request_id`, `evaluator_id`, `evaluated_id`, `direction`
-  (`CLIENT_TO_PROVIDER` o `PROVIDER_TO_CLIENT`), `rating` (SMALLINT 1–5), `comment` (VARCHAR(500), opcional),
-  `created_at`. Única por `(service_request_id, direction)` (RN-012).
-- **Crear:** `POST /api/users/evaluations` `{serviceRequestId, rating, comment}`. La dirección y el evaluado se deducen
-  del token y de la participación; el cuerpo no los trae.
-- **Verificar el cierre sin leer la base ajena:** ms-users consulta a ms-services
-  `GET /internal/services/{serviceRequestId}/participation` (nueva, con `X-Internal-Api-Key`) → `{status, clientId,
-  providerId, closedAt}`. ms-services necesita su propio filtro de clave interna (el patrón de ms-users).
-- **Respuestas:** 201 creada; repetir la misma evaluación responde la existente; una segunda distinta, 409; servicio no
-  `CLOSED` o actor que no participó, 422; ms-services caído, 503.
-- **Consultar:** `GET /api/users/evaluations?serviceRequestId=…` solo para los participantes.
-- **Evento:** `evaluacion.registrada` desde el Outbox **propio de ms-users**, en el tópico `fixia.users.evaluations`,
-  clave y `correlationId` = `serviceRequestId`, mismo sobre que GC-436 con `producer: "ms-users"`.
-- ❓ Corregir o borrar una evaluación: fuera del sprint salvo decisión de GC-443.
-- Empresas: el MVP empresarial termina en la selección (ALC-08), así que no hay evaluación de empresas.
+- **Custodio:** `ms-users`, tabla `service_evaluations` (V9): una por `(service_request_id, direction)`, nota 1–5,
+  comentario opcional (500), `source` (`CONFIRMED_CLOSURE`; la resolución administrativa queda reservada, RF-055) y
+  `service_closed_at`. Inmutable: no se edita ni se borra en el sprint.
+- **Verificar el cierre sin leer la base ajena:** ms-services expone su **primera ruta interna**,
+  `GET /internal/services/{serviceRequestId}/participation` con `X-Internal-Api-Key` → `{serviceRequestId, status,
+  clientId, providerId, providerType, closedAt}` (404 si no existe). Necesita su propio filtro de clave interna.
+- **Crear:** `POST /api/users/evaluations` `{serviceRequestId, rating, comment}` (cliente y técnico; empresa 403). La
+  dirección y el evaluado se deducen del token y de la participación.
+- **Respuestas:** 201 creada; repetida igual, 200 con la existente y sin otro evento; otra distinta, 409; tercero o
+  servicio inexistente, 404; 422 con `SERVICE_NOT_CLOSED`, `COMPANY_SERVICE_NOT_EVALUABLE` o
+  `EVALUATION_WINDOW_EXPIRED` (plazo de 2 días desde el cierre, configurable) o `EVALUATED_USER_NOT_FOUND`;
+  ms-services caído, 503. ✅ Implementado en GC-444.
+- **Consultar:** `GET /api/users/evaluations?serviceRequestIds=a,b` (1 a 50): las evaluaciones de esos servicios en las
+  que quien consulta es evaluador o evaluado. Sirve al detalle de un servicio y al historial (sección 9).
+- **Evento:** `evaluacion.registrada` (v1) por el Outbox **propio de ms-users** (mismas columnas que el de
+  ms-services), tópico `fixia.users.evaluations`, **clave = evaluado**, `correlationId` = la solicitud. Sin el
+  comentario.
+- Empresas: no se evalúan (ALC-08, RN-017).
 
-### 7.2 Reputación (🟡 GC-446, la muestra GC-447)
+### 7.2 Reputación (🟡 GC-446, Juan Pablo; la muestra GC-447)
 
-- Se **calcula al consultar** con las evaluaciones `CLIENT_TO_PROVIDER` del técnico (promedio y conteo). Sin tabla de
-  proyección ni consumidor: no hay nada que duplicar y siempre coincide con la fuente (CA-30).
-- Llega al frontend dentro del perfil público que ya existe: `provider.reputation = {"average": 4.5, "count": 12}`
-  en los postulantes (GC-425), y `null` si el técnico no tiene evaluaciones. Promedio redondeado a un decimal.
-- Si la carga crece, se pasa a una proyección alimentada por `evaluacion.registrada`, idempotente por `eventId`.
+- Regla: promedio (un decimal) y conteo de las evaluaciones `CLIENT_TO_PROVIDER` del técnico; `null` sin evaluaciones.
+- Llega en el perfil público que ya existe: `reputation = {"average": 4.5, "count": 12}` en los postulantes (GC-425).
+- Recomendado: **calcular al consultar** en ms-users (opción A del contrato). Una proyección alimentada por
+  `evaluacion.registrada` (opción B) queda pendiente de aprobación en GC-446.
 
 ## 8. Empresa (✅ GC-466 en ms-users, ✅ GC-468 en ms-services)
 
@@ -275,14 +310,27 @@ Implementado por Tomás R. (V8 de ms-users), con dos ajustes frente a la propues
     "eligibleTechnicianIds": ["7ec00000-0000-4000-8000-000000000001"] }
   ```
 
-## 9. Historial propio (🟡 GC-448, GC-449)
+## 9. Historial propio (✅ GC-448 backend / 🟡 GC-449 Flutter)
 
-- `GET /api/services/history?cursor=…&limit=20` para cliente y técnico: los servicios donde participó, del más reciente
-  al más antiguo, con paginación por cursor (como ADR-044).
-- Por elemento: `serviceRequestId`, `role` (cómo participó), `counterpartId`, `category`, `status`, `budgetAmount`,
-  `contractedAmount` (si hay contrato), `currency`, fechas clave y `lastTransitionAt`.
+- `GET /api/services/history?cursor=…&limit=20` para cliente (`ROLE_CLIENT`) y técnico (`ROLE_PROFESSIONAL`); la empresa
+  recibe 403. Quien consulta y su rol salen del token. `limit` de 1 a 50 (20 por defecto); un `limit` o un `cursor` inválido
+  es 400. Sin servicios, página vacía (no 404).
+- ✅ **Solo servicios contratados** (decidido por GC-448, Tomás R.): `CONTRACTED`, `IN_PROGRESS`, `TECHNICIAN_FINISHED` y
+  `CLOSED`, del más reciente al más antiguo por `contractedAt` (empates por `id`), con paginación por cursor opaco como
+  ADR-044. Las solicitudes que nunca se contrataron siguen en `GET /api/services/requests`.
+- Respuesta: `{ items: [...], nextCursor }`, con `nextCursor` nulo en la última página. Por elemento: `serviceRequestId`,
+  `contractId`, `role` (`CLIENT` o `PROFESSIONAL`: cómo participó quien consulta), `counterpartId` (el prestador para el
+  cliente, el cliente para el prestador), `category`, `status`, `budgetAmount` (presupuesto orientativo, nulo en solicitudes
+  anteriores), `contractedAmount` (lo acordado), `currency`, `agreedAt`, `contractedAt`, `startedAt`, `finishedAt`,
+  `closedAt` y `lastTransitionAt`.
+- Las fechas de ejecución salen del historial de transiciones (sección 5.2) y son nulas si el servicio aún no llegó a esa
+  etapa o es anterior a la tabla (RD-08): `startedAt` es la primera vez que pasó a `IN_PROGRESS`, `finishedAt` la declaración de
+  fin vigente (vuelve a nulo si el cliente objeta y el servicio retoma la ejecución) y `closedAt` el cierre.
+- Es un resumen. El detalle es el que ya existe: `GET /api/services/contracts/{contractId}` (técnico) y
+  `GET /api/services/requests/{id}/contract` (cliente), con `timeline`. No lleva dirección exacta, contacto, el motivo de una
+  objeción ni evaluaciones.
 - Las evaluaciones no se mezclan en ms-services: el frontend pide a ms-users
-  `GET /api/users/evaluations/mine?serviceRequestIds=…`. Así ninguna base lee a la otra y el historial no depende de que
+  `GET /api/users/evaluations?serviceRequestIds=…` (🟡 GC-444, contrato de GC-443). Así ninguna base lee a la otra y el historial no depende de que
   ms-users esté arriba.
 - Nunca se expone el lakehouse ni Kafka como consulta de usuario.
 
@@ -295,7 +343,7 @@ Implementado por Tomás R. (V8 de ms-users), con dos ajustes frente a la propues
 | `servicio.cierre_objetado` ✅ | ms-services (GC-441) | `contractId`, `serviceRequestId`, `clientId`, `providerId`, `objectedAt`, `status` (`IN_PROGRESS`); sin el texto del motivo |
 | `servicio.cerrado` ✅ | ms-services (GC-441) | `contractId`, `serviceRequestId`, `clientId`, `providerId`, `closedAt`, `status` (`CLOSED`) |
 | `evidencia.registrada` | ms-services (GC-439) | `evidenceId`, `serviceRequestId`, `uploadedBy`, `contentType`, `sizeBytes`, `sha256` (sin el archivo ni la clave del objeto) |
-| `evaluacion.registrada` | ms-users (GC-444) | `evaluationId`, `serviceRequestId`, `direction`, `evaluatorId`, `evaluatedId`, `rating` (sin el comentario) |
+| `evaluacion.registrada` | ms-users (GC-444; esquema de GC-443 en `ms-users/docs/events`) | `evaluationId`, `serviceRequestId`, `direction`, `evaluatorId`, `evaluatedId`, `rating`, `source`, `serviceClosedAt` (sin el comentario) |
 
 Todos usan el sobre, el tópico y las reglas de idempotencia de GC-436. Los de ms-services van en
 `fixia.services.service-requests` con la misma secuencia por solicitud; el de ms-users va en su propio tópico.
@@ -304,8 +352,8 @@ Todos usan el sobre, el tópico y las reglas de idempotencia de GC-436. Los de m
 
 | Repositorio | Siguiente | Para |
 | --- | --- | --- |
-| ms-services | V12 | V8 es el presupuesto (GC-421), V9 el inicio y el historial (GC-437), V10 la finalización y el cierre (GC-441) y V11 la versión de la cotización (GC-427), ya tomadas |
-| ms-services | luego | Tipo de prestador (GC-468), evidencias (GC-439) |
+| ms-services | V14 | V8 es el presupuesto (GC-421), V9 el inicio y el historial (GC-437), V10 la finalización y el cierre (GC-441), V11 la versión de la cotización (GC-427), V12 el tipo de prestador (GC-468) y V13 el índice del historial del cliente (GC-448), ya tomadas |
+| ms-services | luego | Evidencias (GC-439) |
 | ms-users | V9 en adelante | V8 es la empresa (GC-466), ya tomada; evaluaciones y su Outbox (GC-444) |
 
 **Regla:** el número lo toma quien **fusiona primero**. Antes de fusionar un PR con migración, se actualiza la rama
@@ -321,8 +369,9 @@ Flyway no arranca.
 | Contraoferta del cliente | Fuera del sprint | GC-427 con el PO |
 | ~~Objeción al cierre~~ | **Decidido:** vuelve a `IN_PROGRESS` con motivo (GC-441, confirmado por el PO) | — |
 | Límites de evidencias | JPEG, PNG, WebP, PDF; 10 MB; 10 por servicio | GC-439, GC-440, GC-456 |
-| Corregir evaluaciones | No en el sprint | GC-443 (Juan Pablo) |
+| ~~Corregir evaluaciones~~ | **Decidido:** no se editan ni se borran en el sprint (GC-443, DD CD-08) | — |
 | Técnico en varias empresas o también independiente | Una empresa; puede seguir como independiente | PO con GC-466 |
-| Reputación: calcular al leer o proyección | Calcular al leer | GC-446 (Tomás O.) |
+| Reputación: calcular al leer o proyección | Calcular al leer (opción A de GC-443) | GC-446 (Juan Pablo) |
+| ~~Plazo para evaluar~~ | **Decidido:** 2 días desde el cierre, configurable (GC-443, RF-053) | — |
 
 Se toman en la primera semana del sprint; quien decide actualiza este documento.
