@@ -104,7 +104,7 @@ porque ambas cosas ocurren en la misma transacción y el contrato ya trae la cot
 | --- | --- | --- |
 | `solicitud.vencida`, `cotizacion.vencida` | `ms-services` (proceso programado, DEC-S4-11) | Que exista el proceso que vence solicitudes y cotizaciones |
 | `solicitud.cancelada` | `ms-services` | Que exista la cancelación en la API |
-| `evaluacion.registrada` | `ms-users`, con su propio Outbox y tópico | GC-444 |
+| `evaluacion.registrada` | `ms-users`, con su propio Outbox y tópico (`fixia.users.evaluations`); contrato y esquema en `ms-users/docs/events` (GC-443) | GC-444 |
 
 Un evento reservado se agrega a este contrato con su esquema antes de publicarse; mientras no tenga esquema, el
 consumidor lo trata como tipo desconocido (sección 11).
