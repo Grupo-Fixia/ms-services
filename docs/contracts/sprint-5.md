@@ -22,7 +22,7 @@ tareas del Sprint 5 en Jira.
 | --- | --- |
 | Identidad | El actor sale siempre del token: `sub` = `usr_<users.id>` y `roles` = `ROLE_CLIENT`, `ROLE_PROFESSIONAL`, `ROLE_ADMIN` (y `ROLE_COMPANY`, sección 8). Nunca se confía en un id de usuario del cuerpo |
 | Referencias entre servicios | Siempre `users.id` de ms-users (UUID), sin clave foránea entre bases (Database per Service) |
-| Rutas por rol en ms-services | `/api/services/requests/**` cliente; `/applications/**` y `/opportunities/**` técnico y empresa (GC-468); `/quotations/**`, `/contracts/**` técnico. Las rutas internas van bajo `/internal/**` con `X-Internal-Api-Key` y no pasan por el gateway |
+| Rutas por rol en ms-services | `/api/services/requests/**` cliente; `/applications/**` y `/opportunities/**` técnico y empresa (GC-468); `/quotations/**`, `/contracts/**` técnico; `/history` cliente y técnico (GC-448). Las rutas internas van bajo `/internal/**` con `X-Internal-Api-Key` y no pasan por el gateway |
 | Dinero en la API | Dos campos planos: el importe (`proposedAmount`, `amount`, `budgetAmount`…) como número con hasta 2 decimales, mayor que 0 y máximo 9999999999.99, y su moneda (`currency`, solo `COP`) |
 | Dinero en eventos | Texto decimal con 2 decimales (`"150000.00"`), ver GC-436 |
 | Fechas | ISO-8601 en UTC con `Z`. El reloj del servicio tiene precisión de microsegundos, igual que la base |
@@ -47,7 +47,7 @@ tareas del Sprint 5 en Jira.
 | Identidad de empresa y asociación empresa–técnico | ms-users | 🟡 | GC-466 |
 | Evaluaciones bidireccionales y su Outbox | ms-users | 🟡 | GC-443, GC-444 |
 | Reputación calculada de las evaluaciones | ms-users | 🟡 | GC-446 |
-| Historial propio | ms-services | 🟡 | GC-448 |
+| Historial propio (índice `ix_service_contracts_client`) | ms-services | ✅ V13 | GC-448 |
 
 ## 3. Los cuatro valores económicos (RN-004, RD-08)
 
@@ -275,14 +275,27 @@ Implementado por Tomás R. (V8 de ms-users), con dos ajustes frente a la propues
     "eligibleTechnicianIds": ["7ec00000-0000-4000-8000-000000000001"] }
   ```
 
-## 9. Historial propio (🟡 GC-448, GC-449)
+## 9. Historial propio (✅ GC-448 backend / 🟡 GC-449 Flutter)
 
-- `GET /api/services/history?cursor=…&limit=20` para cliente y técnico: los servicios donde participó, del más reciente
-  al más antiguo, con paginación por cursor (como ADR-044).
-- Por elemento: `serviceRequestId`, `role` (cómo participó), `counterpartId`, `category`, `status`, `budgetAmount`,
-  `contractedAmount` (si hay contrato), `currency`, fechas clave y `lastTransitionAt`.
+- `GET /api/services/history?cursor=…&limit=20` para cliente (`ROLE_CLIENT`) y técnico (`ROLE_PROFESSIONAL`); la empresa
+  recibe 403. Quien consulta y su rol salen del token. `limit` de 1 a 50 (20 por defecto); un `limit` o un `cursor` inválido
+  es 400. Sin servicios, página vacía (no 404).
+- ✅ **Solo servicios contratados** (decidido por GC-448, Tomás R.): `CONTRACTED`, `IN_PROGRESS`, `TECHNICIAN_FINISHED` y
+  `CLOSED`, del más reciente al más antiguo por `contractedAt` (empates por `id`), con paginación por cursor opaco como
+  ADR-044. Las solicitudes que nunca se contrataron siguen en `GET /api/services/requests`.
+- Respuesta: `{ items: [...], nextCursor }`, con `nextCursor` nulo en la última página. Por elemento: `serviceRequestId`,
+  `contractId`, `role` (`CLIENT` o `PROFESSIONAL`: cómo participó quien consulta), `counterpartId` (el prestador para el
+  cliente, el cliente para el prestador), `category`, `status`, `budgetAmount` (presupuesto orientativo, nulo en solicitudes
+  anteriores), `contractedAmount` (lo acordado), `currency`, `agreedAt`, `contractedAt`, `startedAt`, `finishedAt`,
+  `closedAt` y `lastTransitionAt`.
+- Las fechas de ejecución salen del historial de transiciones (sección 5.2) y son nulas si el servicio aún no llegó a esa
+  etapa o es anterior a la tabla (RD-08): `startedAt` es la primera vez que pasó a `IN_PROGRESS`, `finishedAt` la declaración de
+  fin vigente (vuelve a nulo si el cliente objeta y el servicio retoma la ejecución) y `closedAt` el cierre.
+- Es un resumen. El detalle es el que ya existe: `GET /api/services/contracts/{contractId}` (técnico) y
+  `GET /api/services/requests/{id}/contract` (cliente), con `timeline`. No lleva dirección exacta, contacto, el motivo de una
+  objeción ni evaluaciones.
 - Las evaluaciones no se mezclan en ms-services: el frontend pide a ms-users
-  `GET /api/users/evaluations/mine?serviceRequestIds=…`. Así ninguna base lee a la otra y el historial no depende de que
+  `GET /api/users/evaluations/mine?serviceRequestIds=…` (🟡 GC-444). Así ninguna base lee a la otra y el historial no depende de que
   ms-users esté arriba.
 - Nunca se expone el lakehouse ni Kafka como consulta de usuario.
 
@@ -304,8 +317,8 @@ Todos usan el sobre, el tópico y las reglas de idempotencia de GC-436. Los de m
 
 | Repositorio | Siguiente | Para |
 | --- | --- | --- |
-| ms-services | V12 | V8 es el presupuesto (GC-421), V9 el inicio y el historial (GC-437), V10 la finalización y el cierre (GC-441) y V11 la versión de la cotización (GC-427), ya tomadas |
-| ms-services | luego | Tipo de prestador (GC-468), evidencias (GC-439) |
+| ms-services | V14 | V8 es el presupuesto (GC-421), V9 el inicio y el historial (GC-437), V10 la finalización y el cierre (GC-441), V11 la versión de la cotización (GC-427), V12 el tipo de prestador (GC-468) y V13 el índice del historial del cliente (GC-448), ya tomadas |
+| ms-services | luego | Evidencias (GC-439) |
 | ms-users | V9 en adelante | V8 es la empresa (GC-466), ya tomada; evaluaciones y su Outbox (GC-444) |
 
 **Regla:** el número lo toma quien **fusiona primero**. Antes de fusionar un PR con migración, se actualiza la rama

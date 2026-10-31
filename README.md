@@ -404,6 +404,49 @@ El técnico y el cliente toman decisiones distintas y auditables; no hay cierre 
 - **Migración V10:** amplía las restricciones de estado de `service_requests`; no hay columnas nuevas (quién, cuándo y el motivo
   los guarda `service_request_transitions`). La dirección exacta se sigue entregando hasta `CLOSED` y después.
 
+## Historial propio (GC-448)
+
+`GET /api/services/history?limit=20&cursor=...` (`ROLE_CLIENT` y `ROLE_PROFESSIONAL`): los servicios **contratados** en que
+participó quien consulta, del más reciente al más antiguo, con paginación por cursor (`limit` de 1 a 50, 20 por defecto; un
+valor inválido es 400). Quien consulta y su rol salen del token; sin servicios, página vacía. `ROLE_COMPANY` recibe 403.
+
+```json
+{
+  "items": [
+    {
+      "serviceRequestId": "5a0f6e1e-0c0e-4d7e-9a58-3d2b3f2c9a10",
+      "contractId": "9d3a41c2-77a1-4f2e-8d44-0b1a6e2f55c3",
+      "role": "CLIENT",
+      "counterpartId": "7ec00000-0000-4000-8000-000000000001",
+      "category": "PLUMBING",
+      "status": "IN_PROGRESS",
+      "budgetAmount": 200000.00,
+      "contractedAmount": 105000.00,
+      "currency": "COP",
+      "agreedAt": "2026-11-02T15:00:00Z",
+      "contractedAt": "2026-10-30T14:00:00Z",
+      "startedAt": "2026-10-31T09:30:00Z",
+      "finishedAt": null,
+      "closedAt": null,
+      "lastTransitionAt": "2026-10-31T09:30:00Z"
+    }
+  ],
+  "nextCursor": null
+}
+```
+
+- `role` es cómo participó quien consulta y `counterpartId` la otra parte (el prestador para el cliente, el cliente para el
+  prestador). El detalle es el que ya existe: `GET /contracts/{contractId}` (prestador) y `GET /requests/{serviceRequestId}/contract`
+  (cliente); el elemento trae ambos identificadores.
+- Es un resumen: no lleva la dirección exacta, datos de contacto, el motivo de una objeción ni evaluaciones (viven en ms-users;
+  el frontend las pide allí con `serviceRequestId`).
+- `budgetAmount` (presupuesto orientativo) y `contractedAmount` (lo acordado) son datos distintos. Las fechas de ejecución salen
+  del historial de transiciones y son `null` si el servicio aún no llegó a esa etapa o es anterior a él; `finishedAt` es la
+  declaración de fin que sigue vigente, así que vuelve a `null` si el cliente objeta y el servicio retoma la ejecución.
+- `nextCursor` es opaco; se pide la siguiente página con él hasta que sea `null`. El orden es estable (`contractedAt` e `id`):
+  nada se repite ni se salta si se contratan servicios nuevos entre páginas.
+- **Migración V13:** índice `ix_service_contracts_client` para listar por cliente (el del prestador ya existía desde V5).
+
 ## Eventos de negocio (GC-436)
 
 Contrato de los hechos que ms-services publica en Kafka: [docs/events/README.md](docs/events/README.md), con los
