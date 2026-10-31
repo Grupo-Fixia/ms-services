@@ -236,7 +236,7 @@ y el evento en `ms-users/docs/events`. Resumen:
   dirección y el evaluado se deducen del token y de la participación.
 - **Respuestas:** 201 creada; repetida igual, 200 con la existente y sin otro evento; otra distinta, 409; tercero o
   servicio inexistente, 404; 422 con `SERVICE_NOT_CLOSED`, `COMPANY_SERVICE_NOT_EVALUABLE` o
-  `EVALUATION_WINDOW_EXPIRED` (plazo de 30 días desde el cierre, configurable); ms-services caído, 503.
+  `EVALUATION_WINDOW_EXPIRED` (plazo de 2 días desde el cierre, configurable); ms-services caído, 503.
 - **Consultar:** `GET /api/users/evaluations?serviceRequestIds=a,b` (1 a 50): las evaluaciones de esos servicios en las
   que quien consulta es evaluador o evaluado. Sirve al detalle de un servicio y al historial (sección 9).
 - **Evento:** `evaluacion.registrada` (v1) por el Outbox **propio de ms-users** (mismas columnas que el de
@@ -371,6 +371,6 @@ Flyway no arranca.
 | ~~Corregir evaluaciones~~ | **Decidido:** no se editan ni se borran en el sprint (GC-443, DD CD-08) | — |
 | Técnico en varias empresas o también independiente | Una empresa; puede seguir como independiente | PO con GC-466 |
 | Reputación: calcular al leer o proyección | Calcular al leer (opción A de GC-443) | GC-446 (Juan Pablo) |
-| ~~Plazo para evaluar~~ | **Decidido:** 30 días desde el cierre, configurable (GC-443, RF-053) | — |
+| ~~Plazo para evaluar~~ | **Decidido:** 2 días desde el cierre, configurable (GC-443, RF-053) | — |
 
 Se toman en la primera semana del sprint; quien decide actualiza este documento.
