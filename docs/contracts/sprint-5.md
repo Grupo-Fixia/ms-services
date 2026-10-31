@@ -169,6 +169,38 @@ mismo instante y en la misma transacción que el cambio de estado y el evento.
 - `serviceRequest.exactLocation` sigue llegando solo al prestador contratado (ADR-009) y al cliente dueño, también con el
   servicio en curso (`ServiceRequestStatus#exposesExactLocation()`; GC-441 agrega ahí las etapas siguientes).
 
+### 5.4 Contratación: contrato HTTP verificado (✅ GC-430)
+
+Auditoría de la aceptación/rechazo y la formalización (GC-358/359) contra PostgreSQL 16 real y por la API pública, con
+usuarios reales de ms-users. No hubo defectos: el comportamiento ya era el de esta tabla y ahora lo fijan las pruebas
+(`ContractRulesTest`).
+
+| Operación | 200 | 401 | 403 | 404 | 409 |
+| --- | --- | --- | --- | --- | --- |
+| `POST /requests/{id}/quotations/{qid}/acceptance` (cliente) | Aceptada; contrato creado. Repetir devuelve lo mismo | Sin token | Rol distinto de cliente (el prestador no responde) | Solicitud ajena o inexistente, cotización de otra solicitud o inexistente, identificador mal formado | Rechazada, reemplazada, vencida o respondida de otra forma; la solicitud ya no tiene prestador vigente; ya hay otra aceptada |
+| `POST /requests/{id}/quotations/{qid}/rejection` (cliente) | Rechazada. Repetir devuelve lo mismo | Sin token | Rol distinto de cliente | Igual que la aceptación | Aceptada, reemplazada, vencida o la solicitud ya contratada |
+| `GET /requests/{id}/contract` (cliente) | La contratación | Sin token | Rol distinto de cliente | Solicitud ajena o aún sin contratar | — |
+| `GET /contracts/{contractId}` (prestador) | La contratación | Sin token | Rol distinto de prestador | Contrato ajeno o inexistente | — |
+
+Reglas comprobadas:
+
+- **Un contrato por solicitud y por cotización**, creado en la misma transacción que la aceptación. Aceptar de nuevo — incluso
+  con el servicio ya `IN_PROGRESS`, `TECHNICIAN_FINISHED` o `CLOSED` — responde 200 con la cotización `ACCEPTED` y no cambia el
+  contrato, el estado, el historial ni el Outbox: sigue habiendo un solo `servicio.contratado` y una sola transición
+  `CONTRACTED`.
+- **El contrato copia la versión realmente aceptada** (`quotationId`, importe, alcance, condiciones y fecha acordada). Con
+  varias versiones solo la vigente (`SENT`, `current: true`) se acepta; una reemplazada o rechazada da 409 y no crea contrato.
+  Tras aceptar ninguna versión queda `current`.
+- **Concurrencia (PostgreSQL):** 20 aceptaciones simultáneas dejan un contrato y todas responden 200; aceptar a la vez que
+  rechazar deja un solo resultado coherente (la aceptada con un contrato, o la rechazada sin contrato) y aceptar a la vez que
+  se envía una cotización nueva nunca deja un contrato junto a una cotización `SENT`.
+- **Vigencia:** una cotización vencida da 409 al aceptarla o rechazarla y sigue `SENT` con `expired: true`.
+- El contrato sobrevive al reinicio del servicio.
+- **Forma del JSON que consume Flutter** (`http_contract_repository.dart`): `id`, `serviceRequestId`, `quotationId`,
+  `clientId`, `providerId`, `amount` (número), `currency`, `scope`, `conditions`, `agreedAt`, `contractedAt` y
+  `serviceRequest` con `category`, `description`, `approximateLocation.{city, zone}`, `exactLocation.address` y `expectedAt`;
+  además `serviceStatus` y `timeline` (GC-437). Sin datos de contacto ni de pago.
+
 ## 6. Evidencias (🟡 GC-439, GC-440; almacenamiento GC-456)
 
 - **Dónde:** archivo en un bucket **privado** de RustFS (`evidences`, lo crea GC-456); metadatos en la tabla
