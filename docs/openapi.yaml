@@ -148,6 +148,75 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
 
+  /api/services/requests/{id}/compatible-technicians:
+    get:
+      summary: Ver los técnicos compatibles con una de mis solicitudes (GC-474)
+      description: |
+        Prestadores que ofrecen la categoría de la solicitud, atienden su zona y tienen una franja de disponibilidad que
+        incluye su momento esperado, en orden estable y sin ranking. ms-services toma de la solicitud la categoría, la
+        ciudad, las coordenadas aproximadas y el momento esperado, y los consulta a ms-matching-geo por la ruta interna
+        (`POST /internal/matching/technicians`, con la `INTERNAL_API_KEY`), que a su vez los pide a ms-users: aquí no se
+        guarda ningún dato del técnico. Matching aplica además la verificación vigente si ms-users la exige
+        (`fixia.eligibility.require-verified`). A matching nunca viaja la dirección exacta ni nada del cliente.
+
+        Solo mientras la solicitud sigue abierta (publicada y con el momento esperado por delante, la misma regla para
+        postularse y seleccionar); si no, 409 sin consultar a matching. Si la solicitud no existe, es de otro cliente o el
+        identificador no es un UUID, la respuesta es la misma 404.
+
+        **Paginación por cursor.** Una consulta revisa un número acotado de técnicos: una página puede venir corta, o
+        vacía, con `nextCursor` no nulo; hay que seguir pidiendo hasta que sea nulo. El cursor es opaco; uno que matching
+        no emitió da 400. Si matching no responde o responde algo inválido, 503: nunca una lista vacía, que parecería que
+        no hay técnicos. La respuesta no incluye la zona (centro y radio) del técnico, distancia ni datos de contacto.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+        - name: cursor
+          in: query
+          required: false
+          description: El `nextCursor` de la página anterior; sin él se empieza desde el principio.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Una página de técnicos compatibles.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompatibleTechniciansPage'
+        '400':
+          description: Límite fuera de rango o cursor no válido (título "Consulta inválida").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: La solicitud ya no está publicada o su momento esperado ya pasó (título "Solicitud no disponible").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          description: ms-matching-geo no entregó los técnicos (título "Técnicos compatibles no disponibles").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
   /api/services/requests/{id}/applications/{applicationId}/selection:
     post:
       summary: Seleccionar al prestador de una de mis solicitudes (GC-348)
@@ -1474,6 +1543,29 @@ components:
         finishedAt: { type: string, format: date-time, nullable: true, description: La declaración de fin del técnico que sigue vigente; `null` si el cliente la objetó y volvió a ejecución. }
         closedAt: { type: string, format: date-time, nullable: true }
         lastTransitionAt: { type: string, format: date-time, nullable: true, description: El último cambio de estado registrado. }
+
+    CompatibleTechniciansPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompatibleTechnician'
+        nextCursor:
+          type: string
+          nullable: true
+          description: Nulo solo cuando no quedan técnicos por revisar. Una página puede venir corta, o vacía, con cursor no nulo.
+
+    CompatibleTechnician:
+      type: object
+      description: Un técnico compatible con la solicitud. Solo lo público; nunca su zona, distancia ni datos de contacto.
+      properties:
+        userId: { type: string, format: uuid }
+        displayName: { type: string, example: Carlos G., description: Nombre e inicial del apellido. }
+        categories:
+          type: array
+          items: { type: string, example: PLUMBING }
+        city: { type: string, example: Bogotá, description: Ciudad de la zona de atención. }
 
     Applicant:
       type: object
