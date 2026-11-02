@@ -18,6 +18,8 @@ import com.fixia.services.repository.ServiceRequestApplicationRepository;
 import com.fixia.services.repository.ServiceRequestRepository;
 import com.fixia.services.repository.ServiceRequestTransitionRepository;
 import com.fixia.services.service.EventContract;
+import com.fixia.services.storage.InMemoryObjectStore;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,14 +33,8 @@ import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
-import software.amazon.awssdk.core.ResponseInputStream;
-import software.amazon.awssdk.http.AbortableInputStream;
 import software.amazon.awssdk.services.s3.S3Client;
-import software.amazon.awssdk.services.s3.model.GetObjectRequest;
-import software.amazon.awssdk.services.s3.model.GetObjectResponse;
-import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
-import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
@@ -47,8 +43,6 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
@@ -100,6 +94,18 @@ class EvidenceControllerTest {
 
     @BeforeEach
     void cleanDatabase() {
+        InMemoryObjectStore.install(s3Client);
+        outboxRepository.deleteAllInBatch();
+        evidenceRepository.deleteAllInBatch();
+        contractRepository.deleteAllInBatch();
+        quotationRepository.deleteAllInBatch();
+        applicationRepository.deleteAllInBatch();
+        serviceRequestRepository.deleteAllInBatch();
+    }
+
+    /** La base H2 se comparte entre clases de prueba: las evidencias no deben quedar colgando de las solicitudes. */
+    @AfterEach
+    void cleanUp() {
         outboxRepository.deleteAllInBatch();
         evidenceRepository.deleteAllInBatch();
         contractRepository.deleteAllInBatch();
@@ -215,12 +221,6 @@ class EvidenceControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(evidenceId));
 
-        // Mock S3 getObject para descarga
-        ResponseInputStream<GetObjectResponse> s3Stream = new ResponseInputStream<>(
-                GetObjectResponse.builder().contentType("image/jpeg").contentLength((long) VALID_JPEG.length).build(),
-                AbortableInputStream.create(new ByteArrayInputStream(VALID_JPEG))
-        );
-        when(s3Client.getObject(any(GetObjectRequest.class))).thenReturn(s3Stream);
 
         // 3. Prestador descarga
         mockMvc.perform(get("/api/services/contracts/" + service.contractId() + "/evidences/" + evidenceId + "/content")
@@ -230,12 +230,6 @@ class EvidenceControllerTest {
                 .andExpect(header().string(HttpHeaders.CONTENT_TYPE, "image/jpeg"))
                 .andExpect(header().string(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + evidenceId + ".jpg\""));
 
-        // Reiniciar stream para la siguiente lectura
-        ResponseInputStream<GetObjectResponse> s3Stream2 = new ResponseInputStream<>(
-                GetObjectResponse.builder().contentType("image/jpeg").contentLength((long) VALID_JPEG.length).build(),
-                AbortableInputStream.create(new ByteArrayInputStream(VALID_JPEG))
-        );
-        when(s3Client.getObject(any(GetObjectRequest.class))).thenReturn(s3Stream2);
 
         // 4. Cliente descarga
         mockMvc.perform(get("/api/services/requests/" + service.requestId() + "/evidences/" + evidenceId + "/content")
