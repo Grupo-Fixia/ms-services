@@ -4,6 +4,8 @@ spring:
     username: sa
     password: ""
     driver-class-name: org.h2.Driver
+  kafka:
+    bootstrap-servers: localhost:9092
 
 fixia:
   users:
@@ -14,3 +16,6 @@ fixia:
     bucket-evidences: evidences
     access-key: test-access-key
     secret-key: test-secret-key
+  outbox:
+    relay:
+      enabled: false
