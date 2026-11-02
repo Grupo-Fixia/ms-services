@@ -25,6 +25,7 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
@@ -85,7 +86,9 @@ class CompatibleTechniciansControllerTest {
     }
 
     private ServiceRequest request(UUID clientId) {
-        Instant now = Instant.now();
+        // Microsegundos, que es lo que guarda la base: en Linux Instant.now() llega a nanosegundos y la solicitud leída
+        // de la base ya no sería igual a la que se guardó (mismo ajuste que HistoryControllerTest, GC-448).
+        Instant now = Instant.now().truncatedTo(ChronoUnit.MICROS);
         return repository.saveAndFlush(ServiceRequest.publish(clientId, ServiceCategory.PLUMBING,
                 "Fuga de agua en el baño", new ApproximateLocation("Bogotá", "Chapinero", 4.6533, -74.0836),
                 new ExactLocation(EXACT_ADDRESS), now.plus(Duration.ofDays(2)), new BigDecimal("200000"),
