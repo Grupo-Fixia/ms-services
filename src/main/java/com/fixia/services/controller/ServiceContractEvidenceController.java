@@ -3,7 +3,6 @@ package com.fixia.services.controller;
 import com.fixia.services.dto.EvidenceResponse;
 import com.fixia.services.exception.InvalidEvidenceException;
 import com.fixia.services.service.EvidenceService;
-import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -16,7 +15,6 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -40,8 +38,7 @@ public class ServiceContractEvidenceController {
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @ResponseStatus(HttpStatus.CREATED)
-    public EvidenceResponse upload(@AuthenticationPrincipal Jwt jwt,
+    public ResponseEntity<EvidenceResponse> upload(@AuthenticationPrincipal Jwt jwt,
                                    @PathVariable UUID contractId,
                                    @RequestParam("file") MultipartFile file) {
         if (file == null || file.isEmpty()) {
@@ -54,7 +51,8 @@ public class ServiceContractEvidenceController {
             throw new InvalidEvidenceException("No fue posible leer el archivo de evidencia");
         }
         String contentType = file.getContentType();
-        return service.upload(actorId(jwt), contractId, contentType, bytes);
+        EvidenceService.UploadResult result = service.upload(actorId(jwt), contractId, contentType, bytes);
+        return ResponseEntity.status(result.created() ? HttpStatus.CREATED : HttpStatus.OK).body(result.evidence());
     }
 
     @GetMapping
@@ -64,7 +62,7 @@ public class ServiceContractEvidenceController {
     }
 
     @GetMapping("/{evidenceId}/content")
-    public ResponseEntity<InputStreamResource> download(@AuthenticationPrincipal Jwt jwt,
+    public ResponseEntity<byte[]> download(@AuthenticationPrincipal Jwt jwt,
                                                         @PathVariable UUID contractId,
                                                         @PathVariable UUID evidenceId) {
         EvidenceService.EvidenceContent content = service.downloadForProvider(actorId(jwt), contractId, evidenceId);
@@ -74,8 +72,8 @@ public class ServiceContractEvidenceController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
                 .header(HttpHeaders.CONTENT_TYPE, content.evidence().getContentType())
                 .header("X-Content-Type-Options", "nosniff")
-                .contentLength(content.evidence().getSizeBytes())
-                .body(new InputStreamResource(content.stream()));
+                .contentLength(content.bytes().length)
+                .body(content.bytes());
     }
 
     private static String extractExtension(String objectKey) {

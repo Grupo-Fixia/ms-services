@@ -2,7 +2,6 @@ package com.fixia.services.controller;
 
 import com.fixia.services.dto.EvidenceResponse;
 import com.fixia.services.service.EvidenceService;
-import org.springframework.core.io.InputStreamResource;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -38,7 +37,7 @@ public class ServiceRequestEvidenceController {
     }
 
     @GetMapping("/{evidenceId}/content")
-    public ResponseEntity<InputStreamResource> download(@AuthenticationPrincipal Jwt jwt,
+    public ResponseEntity<byte[]> download(@AuthenticationPrincipal Jwt jwt,
                                                         @PathVariable UUID serviceRequestId,
                                                         @PathVariable UUID evidenceId) {
         EvidenceService.EvidenceContent content = service.downloadForClient(clientId(jwt), serviceRequestId, evidenceId);
@@ -48,8 +47,8 @@ public class ServiceRequestEvidenceController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
                 .header(HttpHeaders.CONTENT_TYPE, content.evidence().getContentType())
                 .header("X-Content-Type-Options", "nosniff")
-                .contentLength(content.evidence().getSizeBytes())
-                .body(new InputStreamResource(content.stream()));
+                .contentLength(content.bytes().length)
+                .body(content.bytes());
     }
 
     private static String extractExtension(String objectKey) {

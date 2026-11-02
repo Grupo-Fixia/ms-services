@@ -231,6 +231,22 @@ public class GlobalExceptionHandler {
         return problem;
     }
 
+    @ExceptionHandler(StorageUnavailableException.class)
+    public ProblemDetail handleStorageUnavailable(StorageUnavailableException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
+                "El almacenamiento de evidencias no está disponible. Intente de nuevo en unos minutos");
+        problem.setTitle("Almacenamiento no disponible");
+        return problem;
+    }
+
+    @ExceptionHandler(EvidenceIntegrityException.class)
+    public ProblemDetail handleEvidenceIntegrity(EvidenceIntegrityException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR,
+                "No fue posible verificar la integridad de la evidencia");
+        problem.setTitle("Integridad de la evidencia");
+        return problem;
+    }
+
     @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
     public ProblemDetail handleMaxUploadSize(org.springframework.web.multipart.MaxUploadSizeExceededException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST,

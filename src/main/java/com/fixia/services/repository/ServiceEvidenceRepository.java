@@ -17,6 +17,8 @@ public interface ServiceEvidenceRepository extends JpaRepository<ServiceEvidence
 
     long countByContractId(UUID contractId);
 
+    Optional<ServiceEvidence> findByContractIdAndSha256(UUID contractId, String sha256);
+
     Optional<ServiceEvidence> findByIdAndContractId(UUID id, UUID contractId);
 
     Optional<ServiceEvidence> findByIdAndServiceRequestId(UUID id, UUID serviceRequestId);

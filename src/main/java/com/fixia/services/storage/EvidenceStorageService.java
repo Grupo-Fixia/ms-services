@@ -1,17 +1,28 @@
 package com.fixia.services.storage;
 
 import com.fixia.services.config.StorageProperties;
+import com.fixia.services.exception.EvidenceIntegrityException;
+import com.fixia.services.exception.EvidenceNotFoundException;
 import com.fixia.services.exception.InvalidEvidenceException;
+import com.fixia.services.exception.StorageUnavailableException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.core.ResponseInputStream;
+import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.services.s3.model.PutObjectResponse;
 
+import java.io.IOException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Base64;
 import java.util.HexFormat;
 import java.util.Map;
 import java.util.Set;
@@ -21,6 +32,8 @@ import java.util.Set;
  */
 @Service
 public class EvidenceStorageService {
+
+    private static final Logger log = LoggerFactory.getLogger(EvidenceStorageService.class);
 
     public static final long MAX_FILE_SIZE = 10L * 1024L * 1024L; // 10 MB
 
@@ -73,17 +86,14 @@ public class EvidenceStorageService {
      * Calcula el hash SHA-256 en hexadecimal del contenido.
      */
     public String calculateSha256(byte[] content) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(content);
-            return HexFormat.of().formatHex(hash);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("Algoritmo SHA-256 no disponible en la JVM", e);
-        }
+        return HexFormat.of().formatHex(digest("SHA-256", content));
     }
 
     /**
-     * Escribe el archivo en RustFS.
+     * Escribe el archivo en RustFS y confirma que lo almacenado es lo enviado: el servidor valida el SHA-256 que se le
+     * indica y, además, el ETag devuelto (MD5 de un objeto de una sola parte) se compara con el calculado aquí.
+     *
+     * @throws StorageUnavailableException si el almacenamiento no responde o no puede confirmar la carga
      */
     public void upload(String objectKey, String contentType, byte[] content) {
         PutObjectRequest request = PutObjectRequest.builder()
@@ -91,21 +101,69 @@ public class EvidenceStorageService {
                 .key(objectKey)
                 .contentType(contentType)
                 .contentLength((long) content.length)
+                .checksumSHA256(Base64.getEncoder().encodeToString(digest("SHA-256", content)))
                 .build();
 
-        s3Client.putObject(request, RequestBody.fromBytes(content));
+        PutObjectResponse response;
+        try {
+            response = s3Client.putObject(request, RequestBody.fromBytes(content));
+        } catch (SdkException e) {
+            log.error("No se pudo escribir el objeto {} en el almacenamiento", objectKey, e);
+            throw new StorageUnavailableException("No se pudo escribir en el almacenamiento", e);
+        }
+
+        String expectedEtag = HexFormat.of().formatHex(digest("MD5", content));
+        String etag = response == null ? null : response.eTag();
+        if (etag == null || !expectedEtag.equalsIgnoreCase(etag.replace("\"", ""))) {
+            log.error("El almacenamiento no confirmó la carga de {}: ETag {} distinto de {}", objectKey, etag,
+                    expectedEtag);
+            throw new StorageUnavailableException("El almacenamiento no confirmó la carga del archivo");
+        }
     }
 
     /**
-     * Obtiene el stream del archivo almacenado en RustFS.
+     * Lee el archivo completo (como máximo {@link #MAX_FILE_SIZE}) para poder verificar su integridad antes de
+     * entregarlo.
+     *
+     * @throws EvidenceNotFoundException   si el objeto ya no existe en el almacenamiento
+     * @throws StorageUnavailableException si el almacenamiento no responde
      */
-    public ResponseInputStream<GetObjectResponse> download(String objectKey) {
+    public byte[] download(String objectKey) {
         GetObjectRequest request = GetObjectRequest.builder()
                 .bucket(bucketName)
                 .key(objectKey)
                 .build();
 
-        return s3Client.getObject(request);
+        try (ResponseInputStream<GetObjectResponse> stream = s3Client.getObject(request)) {
+            byte[] content = stream.readNBytes((int) MAX_FILE_SIZE + 1);
+            if (content.length > MAX_FILE_SIZE) {
+                throw new EvidenceIntegrityException("El objeto almacenado excede el tamaño permitido");
+            }
+            return content;
+        } catch (NoSuchKeyException e) {
+            log.error("La evidencia {} tiene metadatos pero no existe en el almacenamiento", objectKey);
+            throw new EvidenceNotFoundException();
+        } catch (SdkException | IOException e) {
+            log.error("No se pudo leer el objeto {} del almacenamiento", objectKey, e);
+            throw new StorageUnavailableException("No se pudo leer del almacenamiento", e);
+        }
+    }
+
+    /** Borra un objeto sin propagar errores: se usa para compensar una subida cuya transacción no se confirmó. */
+    public void deleteQuietly(String objectKey) {
+        try {
+            s3Client.deleteObject(DeleteObjectRequest.builder().bucket(bucketName).key(objectKey).build());
+        } catch (RuntimeException e) {
+            log.warn("No se pudo borrar el objeto huérfano {}; queda para limpieza manual", objectKey, e);
+        }
+    }
+
+    private static byte[] digest(String algorithm, byte[] content) {
+        try {
+            return MessageDigest.getInstance(algorithm).digest(content);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("Algoritmo " + algorithm + " no disponible en la JVM", e);
+        }
     }
 
     private boolean matchesMagicBytes(String mime, byte[] data) {
