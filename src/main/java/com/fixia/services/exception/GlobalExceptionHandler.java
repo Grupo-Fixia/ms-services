@@ -124,6 +124,22 @@ public class GlobalExceptionHandler {
         return problem;
     }
 
+    /** Sin respuesta de matching no se sugieren técnicos a medias ni una lista vacía engañosa (GC-474). */
+    @ExceptionHandler(MatchingLookupException.class)
+    public ProblemDetail handleMatchingUnavailable(MatchingLookupException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
+                "No fue posible consultar los técnicos compatibles. Intenta de nuevo en unos minutos");
+        problem.setTitle("Técnicos compatibles no disponibles");
+        return problem;
+    }
+
+    @ExceptionHandler(InvalidMatchingQueryException.class)
+    public ProblemDetail handleInvalidMatchingQuery(InvalidMatchingQueryException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Consulta inválida");
+        return problem;
+    }
+
     @ExceptionHandler(InvalidApplicationException.class)
     public ProblemDetail handleInvalidApplication(InvalidApplicationException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
