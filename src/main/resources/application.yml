@@ -27,6 +27,17 @@ spring:
       max-file-size: ${SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE:10MB}
       max-request-size: ${SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE:11MB}
 
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:${KAFKA_HOST:localhost:9092}}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      acks: all
+      retries: 3
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+
 fixia:
   jwt:
     issuer: ${JWT_ISSUER:https://auth.fixia.com}
@@ -52,6 +63,13 @@ fixia:
     bucket-evidences: ${RUSTFS_BUCKET_EVIDENCES:evidences}
     access-key: ${RUSTFS_ACCESS_KEY:rustfsadmin}
     secret-key: ${RUSTFS_SECRET_KEY:rustfsadmin}
+  outbox:
+    relay:
+      enabled: ${FIXIA_OUTBOX_RELAY_ENABLED:true}
+      fixed-delay-ms: ${FIXIA_OUTBOX_RELAY_DELAY_MS:2000}
+      initial-delay-ms: ${FIXIA_OUTBOX_RELAY_INITIAL_DELAY_MS:5000}
+      batch-size: ${FIXIA_OUTBOX_RELAY_BATCH_SIZE:50}
+      publish-timeout-seconds: ${FIXIA_OUTBOX_RELAY_TIMEOUT_SECONDS:5}
 
 management:
   endpoints:
