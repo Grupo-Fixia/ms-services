@@ -459,6 +459,34 @@ valor inválido es 400). Quien consulta y su rol salen del token; sin servicios,
   nada se repite ni se salta si se contratan servicios nuevos entre páginas.
 - **Migración V13:** índice `ix_service_contracts_client` para listar por cliente (el del prestador ya existía desde V5).
 
+## Evidencias (GC-439)
+
+El técnico contratado sube fotos o documentos del trabajo; el archivo vive en el bucket **privado** `evidences` de RustFS
+(S3 compatible) y la base solo guarda los metadatos (`service_evidences`: servicio, contrato, autor, fecha, tipo, tamaño
+y SHA-256). Contrato completo en `docs/openapi.yaml` y `docs/contracts/sprint-5.md` §6.
+
+| Operación | Ruta | Quién |
+|---|---|---|
+| Subir (`multipart`, campo `file`) | `POST /api/services/contracts/{contractId}/evidences` | técnico contratado |
+| Listar | `GET /api/services/contracts/{contractId}/evidences` | técnico contratado |
+| Descargar | `GET /api/services/contracts/{contractId}/evidences/{evidenceId}/content` | técnico contratado |
+| Listar | `GET /api/services/requests/{id}/evidences` | cliente dueño |
+| Descargar | `GET /api/services/requests/{id}/evidences/{evidenceId}/content` | cliente dueño |
+
+- **Límites:** JPEG, PNG, WebP y PDF, 10 MB por archivo y 10 por servicio; el contenido real debe coincidir con el tipo
+  declarado. Se sube con el servicio en curso o finalizado por el técnico; son opcionales para el cierre.
+- **201 / 200:** subir el mismo archivo otra vez al mismo contrato devuelve `200` con la evidencia existente, sin duplicar
+  ni publicar otro `evidencia.registrada`.
+- **Sin referencias a subidas incompletas:** la fila y el evento nacen en la misma transacción que confirma la carga; si algo
+  falla, el objeto se borra. Almacenamiento caído: `503`.
+- **Integridad:** cada descarga verifica el SHA-256 antes de entregar el archivo (`500` si no coincide). No hay URLs
+  públicas: la descarga exige `Authorization: Bearer`.
+- **Configuración:** `RUSTFS_ENDPOINT`, `RUSTFS_BUCKET_EVIDENCES`, `RUSTFS_ACCESS_KEY`, `RUSTFS_SECRET_KEY`,
+  `SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE` (10 MB) y `SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE` (11 MB por defecto: el
+  cuerpo multipart suma las cabeceras al archivo; con 10 MB un archivo de exactamente 10 MB se rechaza). Las credenciales
+  por defecto son solo de desarrollo.
+- **Eventos:** `evidencia.registrada` se escribe en el Outbox; queda `PENDING` hasta que el relay (GC-434) lo publique.
+
 ## Eventos de negocio (GC-436)
 
 Contrato de los hechos que ms-services publica en Kafka: [docs/events/README.md](docs/events/README.md), con los

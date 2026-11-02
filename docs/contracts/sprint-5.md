@@ -201,22 +201,36 @@ Reglas comprobadas:
   `serviceRequest` con `category`, `description`, `approximateLocation.{city, zone}`, `exactLocation.address` y `expectedAt`;
   además `serviceStatus` y `timeline` (GC-437). Sin datos de contacto ni de pago.
 
-## 6. Evidencias (✅ GC-439 en ms-services, V14; 🟡 GC-440; almacenamiento GC-456)
+## 6. Evidencias (✅ GC-439 en ms-services, V14 y V15; 🟡 GC-440; almacenamiento GC-456)
 
 - **Dónde:** archivo en un bucket **privado** de RustFS (`evidences`, lo crea GC-456); metadatos en la tabla
-  `service_evidences` de ms-services (migración V14). Nunca binarios en la base ni URLs públicas permanentes (RD-11).
-- **Tabla:** `id`, `service_request_id` (FK), `contract_id` (FK), `uploaded_by`, `object_key`, `content_type`, `size_bytes`, `sha256`,
-  `status` (`PENDING_UPLOAD` o `AVAILABLE`), `created_at`.
-- **Subida:** `POST /api/services/contracts/{contractId}/evidences` (multipart, campo `file`).
-  ms-services valida tipo (magic bytes) y tamaño, calcula el SHA-256, escribe el objeto en RustFS y confirma la fila
-  `AVAILABLE` y el evento `evidencia.registrada` en el Outbox en la misma transacción (CA-28). Si falla el almacenamiento,
-  no queda una evidencia válida.
+  `service_evidences` de ms-services (V14, índice único por contrato y hash en V15). Nunca binarios en la base ni URLs
+  públicas o firmadas (RD-11).
+- **Tabla:** `id`, `service_request_id` (FK), `contract_id` (FK), `uploaded_by`, `object_key`, `content_type`, `size_bytes`,
+  `sha256`, `status`, `created_at`. Solo se persisten filas `AVAILABLE`: la fila existe únicamente cuando la carga ya
+  está confirmada (`PENDING_UPLOAD` y `FAILED` quedan reservados en el esquema y la aplicación no los usa).
+- **Subida:** `POST /api/services/contracts/{contractId}/evidences` (multipart, campo `file`). ms-services valida tipo
+  (magic bytes) y tamaño, calcula el SHA-256, escribe el objeto en RustFS (el servidor valida el SHA-256 enviado y el
+  ETag devuelto se compara con el MD5 calculado) y, en la misma transacción, guarda la fila `AVAILABLE` y el evento
+  `evidencia.registrada` en el Outbox (CA-28).
+- **Fallos parciales:** el borrado del objeto se registra antes de escribir; si la transacción no se confirma (falla la
+  escritura, la base, el Outbox o el commit) el objeto se elimina. Nunca queda una referencia válida a una subida
+  incompleta ni un objeto sin referencia. Almacenamiento caído o sin confirmar la carga: **503**, sin fila ni evento.
+- **Duplicidad:** el mismo archivo (SHA-256) en el mismo contrato devuelve **200** con la evidencia existente, sin
+  objeto ni evento nuevos (reintento seguro). Una evidencia nueva responde **201**.
+- **Integridad:** cada descarga recalcula el SHA-256 y lo compara con el registrado antes de responder; si no coincide
+  se responde **500** (título "Integridad de la evidencia") y no se entrega el archivo. Un objeto ausente responde 404.
+  No hay endpoints para modificar ni borrar evidencias: son inmutables desde la API.
 - **Consulta:** lista de metadatos en `GET /api/services/contracts/{contractId}/evidences` (técnico) y
-  `GET /api/services/requests/{id}/evidences` (cliente); contenido en `.../evidences/{evidenceId}/content`, que
-  ms-services transmite tras validar el permiso.
-- **Permisos:** sube el técnico contratado en `IN_PROGRESS` o `TECHNICIAN_FINISHED`; consultan los dos participantes.
-  Un tercero recibe 404.
-- ✅ **Límites confirmados**: JPEG, PNG, WebP y PDF; máximo 10 MB por archivo y 10 por servicio. Confirmados e implementados en GC-439.
+  `GET /api/services/requests/{id}/evidences` (cliente); contenido en `.../evidences/{evidenceId}/content` de cada
+  ruta, que ms-services transmite tras validar el permiso. Exige `Authorization: Bearer` (Flutter no puede usar
+  `Image.network` sin encabezados).
+- **Permisos:** sube el técnico contratado en `IN_PROGRESS` o `TECHNICIAN_FINISHED` (otro estado: 409); consultan los
+  dos participantes, cada uno por su ruta. Un tercero recibe 404; el rol equivocado (cliente subiendo, técnico por la
+  ruta del cliente, empresa) recibe 403.
+- **Opcionales:** las evidencias no condicionan el cierre del servicio.
+- ✅ **Límites confirmados**: JPEG, PNG, WebP y PDF; máximo 10 MB por archivo y 10 por servicio. Aprobados por GC-440
+  (Andrés) e implementados en GC-439.
 
 ## 7. Evaluaciones y reputación (✅ contrato GC-443 / 🟡 GC-444, GC-446)
 

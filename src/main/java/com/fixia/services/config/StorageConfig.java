@@ -5,11 +5,14 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.core.client.config.ClientOverrideConfiguration;
+import software.amazon.awssdk.core.retry.RetryPolicy;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
 
 import java.net.URI;
+import java.time.Duration;
 
 @Configuration
 @EnableConfigurationProperties(StorageProperties.class)
@@ -31,6 +34,12 @@ public class StorageConfig {
                         AwsBasicCredentials.create(accessKey, secretKey)))
                 .serviceConfiguration(S3Configuration.builder()
                         .pathStyleAccessEnabled(true)
+                        .build())
+                // Una subida mantiene bloqueada la solicitud: un almacenamiento caído debe fallar rápido (503).
+                .overrideConfiguration(ClientOverrideConfiguration.builder()
+                        .apiCallAttemptTimeout(Duration.ofSeconds(8))
+                        .apiCallTimeout(Duration.ofSeconds(20))
+                        .retryPolicy(RetryPolicy.builder().numRetries(1).build())
                         .build())
                 .build();
     }
