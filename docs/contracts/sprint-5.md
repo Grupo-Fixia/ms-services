@@ -43,7 +43,7 @@ tareas del Sprint 5 en Jira.
 | Revisión visible de la cotización | ms-services | ✅ V11 | GC-427 |
 | Estado `IN_PROGRESS`, inicio y tabla de transiciones | ms-services | ✅ V9 | GC-437 |
 | Finalización, cierre y objeción (`TECHNICIAN_FINISHED`, `CLOSED`) | ms-services | ✅ V10 | GC-441 |
-| Evidencias (metadatos en base, archivo en RustFS) | ms-services | 🟡 | GC-439 |
+| Evidencias (metadatos en base, archivo en RustFS) | ms-services | ✅ V14 | GC-439 |
 | Identidad de empresa y asociación empresa–técnico | ms-users | 🟡 | GC-466 |
 | Evaluaciones bidireccionales y su Outbox | ms-users | 🟡 | GC-443, GC-444 |
 | Reputación calculada de las evaluaciones | ms-users | 🟡 | GC-446 |
@@ -201,22 +201,22 @@ Reglas comprobadas:
   `serviceRequest` con `category`, `description`, `approximateLocation.{city, zone}`, `exactLocation.address` y `expectedAt`;
   además `serviceStatus` y `timeline` (GC-437). Sin datos de contacto ni de pago.
 
-## 6. Evidencias (🟡 GC-439, GC-440; almacenamiento GC-456)
+## 6. Evidencias (✅ GC-439 en ms-services, V14; 🟡 GC-440; almacenamiento GC-456)
 
 - **Dónde:** archivo en un bucket **privado** de RustFS (`evidences`, lo crea GC-456); metadatos en la tabla
-  `service_evidences` de ms-services. Nunca binarios en la base ni URLs públicas permanentes (RD-11).
-- **Tabla:** `id`, `service_request_id` (FK), `uploaded_by`, `object_key`, `content_type`, `size_bytes`, `sha256`,
-  `status` (`PENDING_UPLOAD` o `AVAILABLE`), `created_at`, `confirmed_at`.
-- **Subida:** `POST /api/services/contracts/{contractId}/evidences` (multipart, campo `file`, opcional `description`).
-  ms-services valida tipo y tamaño, calcula el SHA-256, escribe el objeto y solo entonces confirma la fila
-  `AVAILABLE` y el evento `evidencia.registrada`. Si falla el almacenamiento, no queda una evidencia válida (CA-28).
+  `service_evidences` de ms-services (migración V14). Nunca binarios en la base ni URLs públicas permanentes (RD-11).
+- **Tabla:** `id`, `service_request_id` (FK), `contract_id` (FK), `uploaded_by`, `object_key`, `content_type`, `size_bytes`, `sha256`,
+  `status` (`PENDING_UPLOAD` o `AVAILABLE`), `created_at`.
+- **Subida:** `POST /api/services/contracts/{contractId}/evidences` (multipart, campo `file`).
+  ms-services valida tipo (magic bytes) y tamaño, calcula el SHA-256, escribe el objeto en RustFS y confirma la fila
+  `AVAILABLE` y el evento `evidencia.registrada` en el Outbox en la misma transacción (CA-28). Si falla el almacenamiento,
+  no queda una evidencia válida.
 - **Consulta:** lista de metadatos en `GET /api/services/contracts/{contractId}/evidences` (técnico) y
   `GET /api/services/requests/{id}/evidences` (cliente); contenido en `.../evidences/{evidenceId}/content`, que
   ms-services transmite tras validar el permiso.
 - **Permisos:** sube el técnico contratado en `IN_PROGRESS` o `TECHNICIAN_FINISHED`; consultan los dos participantes.
   Un tercero recibe 404.
-- ❓ **Límites** (propuesta): JPEG, PNG, WebP y PDF; máximo 10 MB por archivo y 10 por servicio. Confirman GC-439,
-  GC-440 (Andrés) y GC-456 (Juan Pablo).
+- ✅ **Límites confirmados**: JPEG, PNG, WebP y PDF; máximo 10 MB por archivo y 10 por servicio. Confirmados e implementados en GC-439.
 
 ## 7. Evaluaciones y reputación (✅ contrato GC-443 / 🟡 GC-444, GC-446)
 

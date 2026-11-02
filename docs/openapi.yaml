@@ -706,6 +706,114 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
 
+  /api/services/contracts/{contractId}/evidences:
+    post:
+      summary: Subir una evidencia del servicio, como técnico contratado (GC-439)
+      description: |
+        Solo `ROLE_PROFESSIONAL`, y solo el técnico contratado. Sube un archivo multipart (máx. 10 MB, formatos JPEG,
+        PNG, WebP, PDF) mientras el servicio esté en `IN_PROGRESS` o `TECHNICIAN_FINISHED`. Máximo 10 evidencias por servicio.
+        Calcula SHA-256, persiste en RustFS y emite `evidencia.registrada` en el Outbox en la misma transacción.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Evidencia subida y confirmada en RustFS.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Evidence'
+        '400':
+          description: Archivo inválido, tipo no permitido o excede 10 MB.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: El servicio no está en curso/finalizado o se excedió el límite de 10 evidencias.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
+    get:
+      summary: Listar evidencias de la contratación, como técnico (GC-439)
+      description: Solo `ROLE_PROFESSIONAL`, y solo el técnico contratado.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Lista de evidencias registradas, orden cronológico ascendente.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Evidence'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/services/contracts/{contractId}/evidences/{evidenceId}/content:
+    get:
+      summary: Descargar contenido binario de una evidencia, como participante (GC-439)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: evidenceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Archivo binario transmitido como adjunto (`attachment; filename=...`) con cabecera `X-Content-Type-Options: nosniff`.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
   /api/services/requests/{id}/closure:
     post:
       summary: Confirmar el cierre del servicio, como cliente (GC-441)
@@ -1464,3 +1572,24 @@ components:
                 properties:
                   field: { type: string, example: approximateLocation.city }
                   message: { type: string }
+
+    Evidence:
+      type: object
+      required:
+        - id
+        - serviceRequestId
+        - contractId
+        - uploadedBy
+        - contentType
+        - sizeBytes
+        - sha256
+        - createdAt
+      properties:
+        id: { type: string, format: uuid }
+        serviceRequestId: { type: string, format: uuid }
+        contractId: { type: string, format: uuid }
+        uploadedBy: { type: string, format: uuid }
+        contentType: { type: string, example: image/jpeg }
+        sizeBytes: { type: integer, example: 204850 }
+        sha256: { type: string, example: 85dc025a1768406cd1ef7db06ea7d8b598b9a117b3cb341d3c00486bfa332b73 }
+        createdAt: { type: string, format: date-time }

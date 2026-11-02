@@ -66,6 +66,10 @@ public class GlobalExceptionHandler {
         if (ex instanceof MethodArgumentTypeMismatchException mismatch && "contractId".equals(mismatch.getName())) {
             return handleContractNotFound(new ContractNotFoundException());
         }
+        // Y con el id de evidencia (GC-439).
+        if (ex instanceof MethodArgumentTypeMismatchException mismatch && "evidenceId".equals(mismatch.getName())) {
+            return handleEvidenceNotFound(new EvidenceNotFoundException());
+        }
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.NOT_FOUND, "No existe la solicitud indicada");
         problem.setTitle("Solicitud no encontrada");
@@ -196,6 +200,42 @@ public class GlobalExceptionHandler {
     public ProblemDetail handleContractNotFound(ContractNotFoundException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
         problem.setTitle("Contratación no encontrada");
+        return problem;
+    }
+
+    @ExceptionHandler(InvalidEvidenceException.class)
+    public ProblemDetail handleInvalidEvidence(InvalidEvidenceException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Evidencia inválida");
+        return problem;
+    }
+
+    @ExceptionHandler(EvidenceLimitExceededException.class)
+    public ProblemDetail handleEvidenceLimitExceeded(EvidenceLimitExceededException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Límite de evidencias alcanzado");
+        return problem;
+    }
+
+    @ExceptionHandler(EvidenceNotAllowedException.class)
+    public ProblemDetail handleEvidenceNotAllowed(EvidenceNotAllowedException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Evidencia no permitida");
+        return problem;
+    }
+
+    @ExceptionHandler(EvidenceNotFoundException.class)
+    public ProblemDetail handleEvidenceNotFound(EvidenceNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Evidencia no encontrada");
+        return problem;
+    }
+
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    public ProblemDetail handleMaxUploadSize(org.springframework.web.multipart.MaxUploadSizeExceededException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST,
+                "El archivo excede el tamaño máximo permitido de 10 MB");
+        problem.setTitle("Archivo demasiado grande");
         return problem;
     }
 }

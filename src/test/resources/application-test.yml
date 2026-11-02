@@ -8,3 +8,9 @@ spring:
 fixia:
   users:
     internal-api-key: clave-interna-de-prueba
+  storage:
+    endpoint: http://localhost:9000
+    region: us-east-1
+    bucket-evidences: evidences
+    access-key: test-access-key
+    secret-key: test-secret-key
