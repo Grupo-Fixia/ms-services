@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fixia.local/schemas/events/evidencia.registrada.v1.schema.json",
+  "title": "evidencia.registrada (versión 1)",
+  "description": "El técnico contratado subió una evidencia al servicio (GC-439, RF-047). Guarda la prueba de integridad (SHA-256) sin exponer el archivo binario ni la clave del objeto.",
+  "allOf": [
+    {
+      "$ref": "https://fixia.local/schemas/events/envelope.v1.schema.json"
+    }
+  ],
+  "properties": {
+    "eventType": {
+      "const": "evidencia.registrada"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "actor": {
+      "properties": {
+        "role": {
+          "const": "PROFESSIONAL"
+        }
+      }
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "evidenceId",
+        "serviceRequestId",
+        "uploadedBy",
+        "contentType",
+        "sizeBytes",
+        "sha256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "evidenceId": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
+        },
+        "serviceRequestId": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
+        },
+        "uploadedBy": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
+        },
+        "contentType": {
+          "type": "string",
+          "enum": [
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+            "application/pdf"
+          ]
+        },
+        "sizeBytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10485760
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    }
+  }
+}
+
