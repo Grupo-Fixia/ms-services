@@ -710,9 +710,16 @@ paths:
     post:
       summary: Subir una evidencia del servicio, como técnico contratado (GC-439)
       description: |
-        Solo `ROLE_PROFESSIONAL`, y solo el técnico contratado. Sube un archivo multipart (máx. 10 MB, formatos JPEG,
-        PNG, WebP, PDF) mientras el servicio esté en `IN_PROGRESS` o `TECHNICIAN_FINISHED`. Máximo 10 evidencias por servicio.
-        Calcula SHA-256, persiste en RustFS y emite `evidencia.registrada` en el Outbox en la misma transacción.
+        Solo `ROLE_PROFESSIONAL`, y solo el técnico contratado. Cuerpo `multipart/form-data` con el campo `file`.
+        Formatos: JPEG, PNG, WebP y PDF; el tipo declarado debe coincidir con el contenido real. Máximo **10 MB** por
+        archivo y **10 evidencias** por servicio. Solo se acepta mientras el servicio está en `IN_PROGRESS` o
+        `TECHNICIAN_FINISHED`. Las evidencias son opcionales: no condicionan el cierre.
+
+        La evidencia solo existe cuando el archivo quedó confirmado en el almacenamiento y los metadatos en la base;
+        si algo falla no queda nada (ni evidencia ni evento). Al confirmarse se publica `evidencia.registrada`.
+
+        **Idempotente:** subir otra vez el mismo archivo (mismo SHA-256) al mismo contrato devuelve `200` con la
+        evidencia ya registrada, sin duplicarla ni publicar otro evento. Es seguro reintentar tras un corte de red.
       security:
         - bearerAuth: []
       parameters:
@@ -735,31 +742,49 @@ paths:
                   format: binary
       responses:
         '201':
-          description: Evidencia subida y confirmada en RustFS.
+          description: Evidencia nueva registrada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Evidence'
+        '200':
+          description: El archivo ya estaba registrado en este contrato; se devuelve la evidencia existente.
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/Evidence'
         '400':
-          description: Archivo inválido, tipo no permitido o excede 10 MB.
+          description: |
+            Archivo vacío, ausente, de tipo no permitido, que no coincide con su formato real o de más de 10 MB
+            (título "Evidencia inválida" o "Archivo demasiado grande").
           content:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
-          $ref: '#/components/responses/NotFound'
-        '409':
-          description: El servicio no está en curso/finalizado o se excedió el límite de 10 evidencias.
+          description: El contrato no existe o el técnico autenticado no es el contratado.
           content:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+        '409':
+          description: |
+            El servicio no está en curso ni finalizado por el técnico (título "Evidencia no permitida"), o ya tiene
+            10 evidencias (título "Límite de evidencias alcanzado").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          $ref: '#/components/responses/StorageUnavailable'
 
     get:
-      summary: Listar evidencias de la contratación, como técnico (GC-439)
-      description: Solo `ROLE_PROFESSIONAL`, y solo el técnico contratado.
+      summary: Listar las evidencias del contrato, como técnico contratado (GC-439)
+      description: Solo `ROLE_PROFESSIONAL`, y solo el técnico contratado. Orden cronológico ascendente.
       security:
         - bearerAuth: []
       parameters:
@@ -771,7 +796,7 @@ paths:
             format: uuid
       responses:
         '200':
-          description: Lista de evidencias registradas, orden cronológico ascendente.
+          description: Evidencias registradas (lista vacía si no hay ninguna).
           content:
             application/json:
               schema:
@@ -780,12 +805,22 @@ paths:
                   $ref: '#/components/schemas/Evidence'
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
 
   /api/services/contracts/{contractId}/evidences/{evidenceId}/content:
     get:
-      summary: Descargar contenido binario de una evidencia, como participante (GC-439)
+      summary: Descargar el archivo de una evidencia, como técnico contratado (GC-439)
+      description: |
+        Solo el técnico contratado; el cliente usa `/api/services/requests/{id}/evidences/{evidenceId}/content`.
+        No hay URLs públicas ni firmadas: la descarga exige `Authorization: Bearer <token>`. En Flutter, pida el
+        archivo con ese encabezado (por ejemplo `http.get` y mostrar los bytes con `Image.memory`); `Image.network`
+        sin encabezados no funciona.
+
+        Antes de entregarlo se verifica que el contenido coincide con el SHA-256 registrado.
+        Respuesta con `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` y `Content-Length`.
       security:
         - bearerAuth: []
       parameters:
@@ -803,16 +838,107 @@ paths:
             format: uuid
       responses:
         '200':
-          description: Archivo binario transmitido como adjunto (`attachment; filename=...`) con cabecera `X-Content-Type-Options: nosniff`.
+          description: Archivo binario con el `Content-Type` con el que se subió.
           content:
-            application/octet-stream:
-              schema:
-                type: string
-                format: binary
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+            application/pdf: { schema: { type: string, format: binary } }
         '401':
           $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: El contrato o la evidencia no existen, o no es el técnico contratado.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          description: El contenido almacenado no coincide con su SHA-256; no se entrega el archivo (título "Integridad de la evidencia").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          $ref: '#/components/responses/StorageUnavailable'
+
+  /api/services/requests/{id}/evidences:
+    get:
+      summary: Listar las evidencias del servicio, como cliente dueño (GC-439)
+      description: Solo `ROLE_CLIENT`, y solo el cliente dueño de la solicitud. Orden cronológico ascendente.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Evidencias registradas (lista vacía si no hay ninguna).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Evidence'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
+
+  /api/services/requests/{id}/evidences/{evidenceId}/content:
+    get:
+      summary: Descargar el archivo de una evidencia, como cliente dueño (GC-439)
+      description: |
+        Solo el cliente dueño de la solicitud. Misma entrega y verificación que la descarga del técnico: exige
+        `Authorization: Bearer <token>`, no hay URLs públicas y se verifica el SHA-256 antes de responder.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: evidenceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Archivo binario con el `Content-Type` con el que se subió.
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+            application/pdf: { schema: { type: string, format: binary } }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: La solicitud o la evidencia no existen, o no es el cliente dueño.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          description: El contenido almacenado no coincide con su SHA-256; no se entrega el archivo (título "Integridad de la evidencia").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          $ref: '#/components/responses/StorageUnavailable'
 
   /api/services/requests/{id}/closure:
     post:
@@ -1090,6 +1216,20 @@ components:
             title: Solicitud no encontrada
             status: 404
             detail: No existe la solicitud indicada
+
+    StorageUnavailable:
+      description: |
+        El almacenamiento de archivos no respondió o no pudo confirmar la operación (título "Almacenamiento no
+        disponible"). No se registró nada; reintente más tarde.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Almacenamiento no disponible
+            status: 503
+            detail: El almacenamiento de evidencias no está disponible. Intente de nuevo en unos minutos
 
     ValidationError:
       description: Datos inválidos o faltantes; `errors` indica qué corregir.
@@ -1591,5 +1731,8 @@ components:
         uploadedBy: { type: string, format: uuid }
         contentType: { type: string, example: image/jpeg }
         sizeBytes: { type: integer, example: 204850 }
-        sha256: { type: string, example: 85dc025a1768406cd1ef7db06ea7d8b598b9a117b3cb341d3c00486bfa332b73 }
+        sha256:
+          type: string
+          description: SHA-256 hexadecimal del archivo, verificado en cada descarga.
+          example: 85dc025a1768406cd1ef7db06ea7d8b598b9a117b3cb341d3c00486bfa332b73
         createdAt: { type: string, format: date-time }
