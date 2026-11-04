@@ -176,6 +176,10 @@ devuelve hasta que la solicitud está contratada (`CONTRACTED`) o en curso (`IN_
   ms-users. Un prestador que ms-users ya no reconoce como técnico activo sale con `provider: null`; si ms-users no
   responde, 503 "Perfiles no disponibles" (no se muestran perfiles a medias ni inventados). Nunca se entregan correo,
   teléfono, documento ni ubicación del prestador.
+- **Reputación real (GC-446):** el perfil del técnico trae también `reputation: {"average": 4.3, "count": 3}`
+  (promedio de 1 a 5 con un decimal y número de evaluaciones de clientes) o `null` si aún no tiene. La calcula ms-users
+  a partir de sus evaluaciones originales; ms-services solo la reenvía, no la guarda. La empresa (`provider` de una
+  postulación de empresa) no tiene reputación propia en este sprint; la del técnico ejecutor va en `executor`.
 - **Postulaciones de empresa (GC-468):** `provider` es la empresa (solo `displayName` con su nombre comercial, que
   ms-services pide en `POST /internal/companies/public-profiles`) y `executor` es el perfil público del técnico que
   propone. En las de un técnico independiente, `executor` es `null`: el prestador es el mismo que ejecuta. Sin

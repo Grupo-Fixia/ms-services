@@ -47,7 +47,7 @@ class TechnicianProfileClientTest {
     private static String profile(UUID userId) {
         return "{\"userId\":\"" + userId + "\",\"displayName\":\"Carlos G.\",\"verificationStatus\":\"PENDING\","
                 + "\"categories\":[\"PLUMBING\"],\"professionalDescription\":\"Plomero\",\"yearsOfExperience\":8,"
-                + "\"city\":\"Bogotá\"}";
+                + "\"city\":\"Bogotá\",\"reputation\":{\"average\":4.3,\"count\":3}}";
     }
 
     @Test
@@ -71,6 +71,8 @@ class TechnicianProfileClientTest {
         assertThat(found.categories()).containsExactly(ServiceCategory.PLUMBING);
         assertThat(found.yearsOfExperience()).isEqualTo(8);
         assertThat(found.city()).isEqualTo("Bogotá");
+        assertThat(found.reputation().average()).isEqualByComparingTo("4.3");
+        assertThat(found.reputation().count()).isEqualTo(3);
         server.verify();
     }
 

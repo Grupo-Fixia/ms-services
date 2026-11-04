@@ -127,7 +127,7 @@ class CompanyApplicationControllerTest {
             Collection<UUID> ids = invocation.getArgument(0);
             return ids.stream().collect(Collectors.toMap(Function.identity(),
                     id -> new TechnicianProfileClient.PublicProfile(id, id.equals(CARLOS) ? "Carlos G." : "Ana R.",
-                            "PENDING", List.of(ServiceCategory.PLUMBING), "Plomero", 8, "Bogotá")));
+                            "PENDING", List.of(ServiceCategory.PLUMBING), "Plomero", 8, "Bogotá", null)));
         });
     }
 

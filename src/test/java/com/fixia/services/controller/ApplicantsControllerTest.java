@@ -94,7 +94,8 @@ class ApplicantsControllerTest {
 
     private static TechnicianProfileClient.PublicProfile profile(UUID userId) {
         return new TechnicianProfileClient.PublicProfile(userId, "Carlos G.", "PENDING",
-                List.of(ServiceCategory.PLUMBING), "Plomero con experiencia", 8, "Bogotá");
+                List.of(ServiceCategory.PLUMBING), "Plomero con experiencia", 8, "Bogotá",
+                new TechnicianProfileClient.Reputation(new java.math.BigDecimal("4.3"), 3));
     }
 
     // ---------- Utilidades ----------
@@ -215,6 +216,8 @@ class ApplicantsControllerTest {
                 .andExpect(jsonPath("$[0].provider.professionalDescription").value("Plomero con experiencia"))
                 .andExpect(jsonPath("$[0].provider.yearsOfExperience").value(8))
                 .andExpect(jsonPath("$[0].provider.city").value("Bogotá"))
+                .andExpect(jsonPath("$[0].provider.reputation.average").value(4.3))
+                .andExpect(jsonPath("$[0].provider.reputation.count").value(3))
                 .andExpect(jsonPath("$[0].provider.userId").doesNotExist())
                 .andExpect(jsonPath("$[0].provider.email").doesNotExist())
                 .andExpect(jsonPath("$[0].provider.phone").doesNotExist());
