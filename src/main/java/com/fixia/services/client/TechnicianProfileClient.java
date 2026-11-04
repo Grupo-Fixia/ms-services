@@ -29,11 +29,19 @@ public class TechnicianProfileClient {
 
     /**
      * Perfil público del técnico tal como lo entrega ms-users: nombre corto, verificación, especialidades,
-     * descripción, experiencia y ciudad. Los campos que el técnico no ha llenado llegan en {@code null}.
+     * descripción, experiencia, ciudad y reputación (GC-446). Los campos que el técnico no ha llenado llegan en
+     * {@code null}; la reputación también, si todavía nadie lo ha evaluado.
      */
     public record PublicProfile(UUID userId, String displayName, String verificationStatus,
                                 List<ServiceCategory> categories, String professionalDescription,
-                                Integer yearsOfExperience, String city) {
+                                Integer yearsOfExperience, String city, Reputation reputation) {
+    }
+
+    /**
+     * Reputación real que calcula ms-users (GC-446): promedio de 1 a 5 con un decimal y número de evaluaciones de
+     * clientes. ms-services no la calcula ni la guarda: solo la reenvía.
+     */
+    public record Reputation(java.math.BigDecimal average, long count) {
     }
 
     record ProfilesQuery(List<UUID> userIds) {
