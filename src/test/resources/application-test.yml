@@ -19,3 +19,8 @@ fixia:
   outbox:
     relay:
       enabled: false
+  payments:
+    consumer:
+      # Las pruebas llaman al manejador directo; la prueba con broker en memoria lo enciende por su cuenta.
+      enabled: false
+      retry-delay-ms: 200

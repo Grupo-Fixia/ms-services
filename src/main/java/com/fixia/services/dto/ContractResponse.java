@@ -1,5 +1,6 @@
 package com.fixia.services.dto;
 
+import com.fixia.services.domain.ContractPaymentStatus;
 import com.fixia.services.domain.CurrencyCode;
 import com.fixia.services.domain.ServiceCategory;
 import com.fixia.services.domain.ServiceContract;
@@ -18,11 +19,15 @@ import java.util.UUID;
 /**
  * Contratación formalizada (GC-359): lo acordado, copiado de la cotización aceptada, y un resumen de la solicitud. Como
  * la solicitud ya está contratada, el resumen incluye la dirección exacta (si el cliente la dio), que es lo que recibe
- * el prestador (ADR-009). No hay datos de contacto ni de pago: el pago ocurre fuera de Fixia.
+ * el prestador (ADR-009). No hay datos de contacto ni importes de pago: solo {@code paymentStatus}.
  *
  * <p>{@code serviceStatus} es el estado actual del servicio (GC-437) y {@code timeline} su historial de transiciones, del
  * más antiguo al más reciente; los ven igual el cliente y el prestador. El listado de contrataciones no trae
  * {@code timeline}: se pide al consultar una contratación. Un servicio anterior al historial lo trae vacío o parcial.
+ *
+ * <p>{@code paymentStatus} (GC-490) es lo que ms-payments confirmó del pago virtual: {@code HELD} (saldo retenido, el
+ * servicio puede iniciar), {@code FAILED} (no se pudo retener) o {@code PENDING} (sin confirmación). Nunca trae
+ * importes ni datos de la billetera del cliente.
  */
 public record ContractResponse(
         UUID id,
@@ -37,6 +42,7 @@ public record ContractResponse(
         Instant agreedAt,
         Instant contractedAt,
         ServiceRequestStatus serviceStatus,
+        ContractPaymentStatus paymentStatus,
         @JsonInclude(JsonInclude.Include.NON_NULL) List<TransitionResponse> timeline,
         RequestSummary serviceRequest
 ) {
@@ -60,9 +66,13 @@ public record ContractResponse(
         }
     }
 
-    /** @param timeline historial de la solicitud; nulo cuando no se consultó (listado) */
+    /**
+     * @param timeline      historial de la solicitud; nulo cuando no se consultó (listado)
+     * @param paymentStatus estado del pago virtual confirmado por ms-payments (GC-490)
+     */
     public static ContractResponse from(ServiceContract contract, ServiceRequest request,
-                                        List<ServiceRequestTransition> timeline) {
+                                        List<ServiceRequestTransition> timeline,
+                                        ContractPaymentStatus paymentStatus) {
         return new ContractResponse(
                 contract.getId(),
                 contract.getServiceRequestId(),
@@ -76,6 +86,7 @@ public record ContractResponse(
                 contract.getAgreedAt(),
                 contract.getContractedAt(),
                 request.getStatus(),
+                paymentStatus,
                 timeline == null ? null : timeline.stream().map(TransitionResponse::from).toList(),
                 RequestSummary.from(request));
     }

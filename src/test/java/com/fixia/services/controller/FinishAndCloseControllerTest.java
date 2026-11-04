@@ -22,6 +22,7 @@ import com.fixia.services.service.EventContract;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
@@ -74,6 +75,9 @@ class FinishAndCloseControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -136,6 +140,7 @@ class FinishAndCloseControllerTest {
 
     private Service inProgress() throws Exception {
         Service service = contracted();
+        ContractPayments.hold(jdbcTemplate, service.contractId());
         mockMvc.perform(post("/api/services/contracts/" + service.contractId() + "/start").with(professional(PROVIDER)))
                 .andExpect(status().isOk());
         return service;
