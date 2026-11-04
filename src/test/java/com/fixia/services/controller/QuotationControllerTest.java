@@ -36,6 +36,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.hasSize;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
@@ -87,7 +88,8 @@ class QuotationControllerTest {
     private ServiceRequest published(UUID clientId) {
         Instant now = Instant.now();
         return ServiceRequest.publish(clientId, ServiceCategory.PLUMBING, "Fuga de agua en el baño",
-                new ApproximateLocation("Bogotá", "Chapinero"), null, now.plus(Duration.ofDays(5)), List.of(), now);
+                new ApproximateLocation("Bogotá", "Chapinero"), null, now.plus(Duration.ofDays(5)),
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), now);
     }
 
     /** Solicitud del cliente con el prestador ya seleccionado (lo que deja GC-348). */
@@ -100,7 +102,7 @@ class QuotationControllerTest {
     private Quotation storedQuotation(ServiceRequest request, UUID providerId, Instant sentAt) {
         return quotationRepository.saveAndFlush(Quotation.send(request, providerId, new BigDecimal("90000"),
                 CurrencyCode.COP, "Cambio de empaque", "Pago al terminar", sentAt.plus(Duration.ofHours(2)),
-                sentAt.plus(Duration.ofHours(1)), sentAt));
+                sentAt.plus(Duration.ofHours(1)), 1, sentAt));
     }
 
     private static RequestPostProcessor professional(UUID id) {
@@ -151,6 +153,8 @@ class QuotationControllerTest {
                 .andExpect(jsonPath("$.status").value("SENT"))
                 .andExpect(jsonPath("$.statusName").value("Enviada"))
                 .andExpect(jsonPath("$.expired").value(false))
+                .andExpect(jsonPath("$.revision").value(1))
+                .andExpect(jsonPath("$.current").value(true))
                 .andExpect(jsonPath("$.respondedAt").doesNotExist()));
 
         Quotation stored = quotationRepository.findById(id).orElseThrow();
@@ -175,6 +179,38 @@ class QuotationControllerTest {
         assertThat(quotationRepository.findById(first).orElseThrow().getStatus()).isEqualTo(QuotationStatus.SUPERSEDED);
         assertThat(quotationRepository.findById(second).orElseThrow().getStatus()).isEqualTo(QuotationStatus.SENT);
         assertThat(quotationRepository.findByServiceRequestIdAndStatus(request.getId(), QuotationStatus.SENT)).hasSize(1);
+    }
+
+    @Test
+    void cadaEnvioTieneSuVersionYSoloLaUltimaEsLaVigente() throws Exception {
+        ServiceRequest request = selectedRequest(CLIENT, PROVIDER);
+        for (int expected = 1; expected <= 3; expected++) {
+            send(PROVIDER, validBody(request.getId()))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.revision").value(expected))
+                    .andExpect(jsonPath("$.current").value(true));
+        }
+
+        // El cliente y el prestador ven el mismo historial, de la versión más nueva a la más vieja.
+        mockMvc.perform(get("/api/services/requests/" + request.getId() + "/quotations").with(client(CLIENT)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].revision", contains(3, 2, 1)))
+                .andExpect(jsonPath("$[*].status", contains("SENT", "SUPERSEDED", "SUPERSEDED")))
+                .andExpect(jsonPath("$[*].current", contains(true, false, false)));
+        mockMvc.perform(get(BASE).param("serviceRequestId", request.getId().toString()).with(professional(PROVIDER)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[*].revision", contains(3, 2, 1)))
+                .andExpect(jsonPath("$[*].current", contains(true, false, false)));
+    }
+
+    @Test
+    void laVersionSeNumeraPorSolicitudYNoEntreSolicitudes() throws Exception {
+        ServiceRequest first = selectedRequest(CLIENT, PROVIDER);
+        ServiceRequest second = selectedRequest(OTHER_CLIENT, PROVIDER);
+
+        send(PROVIDER, validBody(first.getId())).andExpect(jsonPath("$.revision").value(1));
+        send(PROVIDER, validBody(first.getId())).andExpect(jsonPath("$.revision").value(2));
+        send(PROVIDER, validBody(second.getId())).andExpect(jsonPath("$.revision").value(1));
     }
 
     @Test
@@ -214,6 +250,9 @@ class QuotationControllerTest {
         assertThat(quotationRepository.findByServiceRequestIdAndStatus(request.getId(), QuotationStatus.SENT)).hasSize(1);
         assertThat(quotationRepository.findByServiceRequestIdAndStatus(request.getId(), QuotationStatus.SUPERSEDED))
                 .hasSize(attempts - 1);
+        // La solicitud bloqueada serializa los envíos: ninguna versión se repite ni se salta.
+        assertThat(quotationRepository.findByServiceRequestIdOrderByRevisionDesc(request.getId()))
+                .extracting(Quotation::getRevision).containsExactly(6, 5, 4, 3, 2, 1);
     }
 
     // ---------- Selección vigente ----------
@@ -256,7 +295,7 @@ class QuotationControllerTest {
         ServiceRequest request = selectedRequest(CLIENT, PROVIDER);
         Quotation accepted = Quotation.send(request, PROVIDER, new BigDecimal("90000"), CurrencyCode.COP, "Alcance",
                 "Condiciones", Instant.now().plus(Duration.ofDays(2)), Instant.now().plus(Duration.ofDays(1)),
-                Instant.now());
+                1, Instant.now());
         accepted.accept(Instant.now());
         quotationRepository.saveAndFlush(accepted);
 
@@ -403,7 +442,9 @@ class QuotationControllerTest {
         mockMvc.perform(get(BASE + "/" + old.getId()).with(professional(PROVIDER)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("SENT"))
-                .andExpect(jsonPath("$.expired").value(true));
+                .andExpect(jsonPath("$.expired").value(true))
+                // Una vencida ya no se puede aceptar: no es la versión vigente.
+                .andExpect(jsonPath("$.current").value(false));
     }
 
     // ---------- Consultas del cliente ----------

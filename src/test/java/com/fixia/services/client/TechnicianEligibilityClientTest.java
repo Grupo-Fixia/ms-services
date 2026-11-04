@@ -2,6 +2,7 @@ package com.fixia.services.client;
 
 import com.fixia.services.config.UsersClientProperties;
 import com.fixia.services.domain.ApproximateLocation;
+import com.fixia.services.domain.CurrencyCode;
 import com.fixia.services.domain.ServiceCategory;
 import com.fixia.services.domain.ServiceRequest;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,6 +14,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+import java.math.BigDecimal;
 import java.net.SocketTimeoutException;
 import java.time.Duration;
 import java.time.Instant;
@@ -50,7 +52,8 @@ class TechnicianEligibilityClientTest {
 
     private static ServiceRequest request(UUID id) {
         ServiceRequest request = ServiceRequest.publish(UUID.randomUUID(), ServiceCategory.ELECTRICAL, "Corto circuito",
-                new ApproximateLocation("Bogotá", "Chapinero", 4.6533, -74.0836), null, EXPECTED_AT, List.of(),
+                new ApproximateLocation("Bogotá", "Chapinero", 4.6533, -74.0836), null, EXPECTED_AT,
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(),
                 EXPECTED_AT.minus(Duration.ofDays(1)));
         ReflectionTestUtils.setField(request, "id", id);
         return request;

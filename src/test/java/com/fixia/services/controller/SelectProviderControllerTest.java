@@ -1,8 +1,10 @@
 package com.fixia.services.controller;
 
 import com.fixia.services.client.TechnicianEligibilityClient;
+import com.fixia.services.client.TechnicianProfileClient;
 import com.fixia.services.domain.ApplicationStatus;
 import com.fixia.services.domain.ApproximateLocation;
+import com.fixia.services.domain.CurrencyCode;
 import com.fixia.services.domain.ExactLocation;
 import com.fixia.services.domain.ServiceCategory;
 import com.fixia.services.domain.ServiceRequest;
@@ -24,6 +26,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -56,6 +59,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 class SelectProviderControllerTest {
 
+    private static final BigDecimal PRICE = new BigDecimal("150000");
+
     private static final UUID CLIENT = UUID.randomUUID();
     private static final UUID OTHER_CLIENT = UUID.randomUUID();
     private static final UUID FIRST = UUID.randomUUID();
@@ -77,6 +82,9 @@ class SelectProviderControllerTest {
     @MockBean
     private TechnicianEligibilityClient eligibilityClient;
 
+    @MockBean
+    private TechnicianProfileClient profileClient;
+
     @BeforeEach
     void cleanDatabase() {
         applicationRepository.deleteAllInBatch();
@@ -91,11 +99,13 @@ class SelectProviderControllerTest {
         Instant now = Instant.now();
         return serviceRequestRepository.saveAndFlush(ServiceRequest.publish(clientId, ServiceCategory.PLUMBING,
                 "Fuga de agua en el baño", new ApproximateLocation("Bogotá", "Chapinero", 4.6533, -74.0836),
-                new ExactLocation("Calle 10 # 5-20, apto 301"), now.plus(Duration.ofDays(2)), List.of(), now));
+                new ExactLocation("Calle 10 # 5-20, apto 301"), now.plus(Duration.ofDays(2)),
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(), now));
     }
 
     private ServiceRequestApplication applied(ServiceRequest request, UUID provider, Instant at) {
-        return applicationRepository.saveAndFlush(ServiceRequestApplication.submit(request, provider, at));
+        return applicationRepository.saveAndFlush(ServiceRequestApplication.submit(request, provider,
+                PRICE, CurrencyCode.COP, at));
     }
 
     /** Solicitud con los tres postulantes de siempre, en orden FIRST, SECOND, THIRD. */

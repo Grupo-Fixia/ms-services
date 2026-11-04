@@ -14,6 +14,7 @@ import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -82,6 +83,18 @@ public class ServiceRequest {
     @Column(name = "expected_at", nullable = false)
     private Instant expectedAt;
 
+    /**
+     * Presupuesto orientativo del cliente (GC-421): un valor único que solo guía al prestador. No es un pago ni un
+     * límite, y es distinto del precio propuesto, de la cotización y del precio contratado. Las solicitudes anteriores
+     * a la migración V8 no lo tienen ({@code null}); las nuevas siempre lo traen.
+     */
+    @Column(name = "budget_amount", precision = 12, scale = Quotation.AMOUNT_SCALE, updatable = false)
+    private BigDecimal budgetAmount;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "budget_currency", length = 3, updatable = false)
+    private CurrencyCode budgetCurrency;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private ServiceRequestStatus status;
@@ -111,7 +124,8 @@ public class ServiceRequest {
     }
 
     private ServiceRequest(UUID clientId, ServiceCategory category, String description,
-                           ApproximateLocation approximate, ExactLocation exact, Instant expectedAt, Instant now) {
+                           ApproximateLocation approximate, ExactLocation exact, Instant expectedAt,
+                           BigDecimal budgetAmount, CurrencyCode budgetCurrency, Instant now) {
         this.clientId = clientId;
         this.category = category;
         this.description = description.strip();
@@ -125,6 +139,8 @@ public class ServiceRequest {
             this.exactLongitude = exact.longitude();
         }
         this.expectedAt = expectedAt;
+        this.budgetAmount = budgetAmount.setScale(Quotation.AMOUNT_SCALE);
+        this.budgetCurrency = budgetCurrency;
         this.status = ServiceRequestStatus.PUBLISHED;
         this.publishedAt = now;
         this.createdAt = now;
@@ -134,13 +150,17 @@ public class ServiceRequest {
     /**
      * Publica una solicitud nueva en estado {@code PUBLISHED}.
      *
-     * @param exact     dirección exacta del cliente; opcional, y protegida hasta la contratación
-     * @param photoKeys claves de almacenamiento de las fotos adjuntas (máximo {@value #MAX_PHOTOS}), en orden
+     * @param exact          dirección exacta del cliente; opcional, y protegida hasta la contratación
+     * @param budgetAmount   presupuesto orientativo (GC-421): obligatorio, mayor que cero, máximo dos decimales y
+     *                       {@link Quotation#MAX_AMOUNT} como tope
+     * @param budgetCurrency moneda del presupuesto, obligatoria
+     * @param photoKeys      claves de almacenamiento de las fotos adjuntas (máximo {@value #MAX_PHOTOS}), en orden
      * @throws IllegalArgumentException si falta un dato obligatorio o alguno no cumple las reglas
      */
     public static ServiceRequest publish(UUID clientId, ServiceCategory category, String description,
                                          ApproximateLocation approximate, ExactLocation exact,
-                                         Instant expectedAt, List<String> photoKeys, Instant now) {
+                                         Instant expectedAt, BigDecimal budgetAmount, CurrencyCode budgetCurrency,
+                                         List<String> photoKeys, Instant now) {
         require(clientId != null, "El cliente es obligatorio");
         require(category != null, "La categoría es obligatoria");
         requireText(description, "La descripción es obligatoria", MAX_DESCRIPTION_LENGTH);
@@ -154,12 +174,19 @@ public class ServiceRequest {
         }
         require(expectedAt != null, "El momento esperado es obligatorio");
         require(expectedAt.isAfter(now), "El momento esperado debe ser posterior a la publicación");
+        require(budgetAmount != null, "El presupuesto es obligatorio");
+        require(budgetAmount.signum() > 0, "El presupuesto debe ser mayor que cero");
+        require(budgetAmount.stripTrailingZeros().scale() <= Quotation.AMOUNT_SCALE,
+                "El presupuesto admite máximo dos decimales");
+        require(budgetAmount.compareTo(Quotation.MAX_AMOUNT) <= 0,
+                "El presupuesto no puede superar " + Quotation.MAX_AMOUNT.toPlainString());
+        require(budgetCurrency != null, "La moneda del presupuesto es obligatoria");
         List<String> keys = photoKeys == null ? List.of() : photoKeys;
         require(keys.size() <= MAX_PHOTOS, "Se permiten máximo " + MAX_PHOTOS + " fotografías");
         keys.forEach(key -> requireText(key, "La clave de la fotografía es obligatoria", MAX_STORAGE_KEY_LENGTH));
 
         ServiceRequest request = new ServiceRequest(clientId, category, description, approximate, exact,
-                expectedAt, now);
+                expectedAt, budgetAmount, budgetCurrency, now);
         for (int index = 0; index < keys.size(); index++) {
             request.photos.add(new ServiceRequestPhoto(request, keys.get(index).strip(), index, now));
         }
@@ -178,6 +205,29 @@ public class ServiceRequest {
         transitionTo(ServiceRequestStatus.CONTRACTED, now);
     }
 
+    /** El prestador contratado inicia el servicio (GC-437). Solo se puede desde {@code CONTRACTED}. */
+    public void start(Instant now) {
+        transitionTo(ServiceRequestStatus.IN_PROGRESS, now);
+    }
+
+    /** El técnico contratado declara que terminó (GC-441). Solo desde {@code IN_PROGRESS}; todavía no es el cierre. */
+    public void finish(Instant now) {
+        transitionTo(ServiceRequestStatus.TECHNICIAN_FINISHED, now);
+    }
+
+    /** El cliente confirma el cierre (GC-441). Solo desde {@code TECHNICIAN_FINISHED}; es definitivo. */
+    public void close(Instant now) {
+        transitionTo(ServiceRequestStatus.CLOSED, now);
+    }
+
+    /**
+     * El cliente objeta el cierre (GC-441): el servicio vuelve a {@code IN_PROGRESS} en vez de cerrarse. Solo desde
+     * {@code TECHNICIAN_FINISHED}: un servicio cerrado no se reabre.
+     */
+    public void objectClosure(Instant now) {
+        transitionTo(ServiceRequestStatus.IN_PROGRESS, now);
+    }
+
     public void cancel(Instant now) {
         transitionTo(ServiceRequestStatus.CANCELLED, now);
     }
@@ -187,10 +237,12 @@ public class ServiceRequest {
     }
 
     public boolean isExactLocationVisible() {
-        return status == ServiceRequestStatus.CONTRACTED;
+        return status.exposesExactLocation();
     }
 
-    /** Dirección exacta; vacía mientras la solicitud no esté contratada, o si el cliente no la indicó. */
+    /**
+     * Dirección exacta; vacía mientras la solicitud no esté contratada (ni en curso), o si el cliente no la indicó.
+     */
     public Optional<ExactLocation> getExactLocation() {
         if (!isExactLocationVisible() || exactAddress == null) {
             return Optional.empty();
@@ -253,6 +305,15 @@ public class ServiceRequest {
 
     public Instant getExpectedAt() {
         return expectedAt;
+    }
+
+    /** Presupuesto orientativo (GC-421); {@code null} en las solicitudes anteriores a él. */
+    public BigDecimal getBudgetAmount() {
+        return budgetAmount;
+    }
+
+    public CurrencyCode getBudgetCurrency() {
+        return budgetCurrency;
     }
 
     public ServiceRequestStatus getStatus() {

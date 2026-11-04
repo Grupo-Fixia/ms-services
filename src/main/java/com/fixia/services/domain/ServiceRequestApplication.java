@@ -12,6 +12,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import jakarta.persistence.Version;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -22,6 +23,8 @@ import java.util.UUID;
  *
  * <p>Solo se crea sobre una solicitud {@link ServiceRequestStatus#PUBLISHED} cuyo momento esperado aún no ha
  * pasado. La elegibilidad del técnico (categoría, zona y disponibilidad) la decide ms-users antes de crearla.
+ * Lleva el precio que propone el técnico (GC-423), que no cambia después: para cambiarlo habría que volver a
+ * postularse, y eso lo impide la unicidad por solicitud y técnico.
  * Los cambios de estado pasan por los métodos de dominio, que validan la transición con
  * {@link ApplicationStatus#canTransitionTo(ApplicationStatus)}.
  */
@@ -44,6 +47,29 @@ public class ServiceRequestApplication {
     @Column(name = "status", nullable = false, length = 20)
     private ApplicationStatus status;
 
+    /**
+     * Precio que propone el técnico (GC-423). Es distinto del presupuesto del cliente y del valor de la cotización.
+     * Las postulaciones anteriores a la migración V6 no lo tienen ({@code null}).
+     */
+    @Column(name = "proposed_amount", precision = 12, scale = Quotation.AMOUNT_SCALE, updatable = false)
+    private BigDecimal proposedAmount;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "currency", length = 3, updatable = false)
+    private CurrencyCode currency;
+
+    /** Quién se postula (GC-468). Las postulaciones anteriores son de técnicos independientes. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "provider_type", nullable = false, length = 20, updatable = false)
+    private ProviderType providerType;
+
+    /**
+     * Técnico asociado que la empresa propone como ejecutor (GC-468, RF-082). {@code null} si se postula un técnico
+     * independiente, que es a la vez prestador y ejecutor. No cambia después de postularse (RN-015).
+     */
+    @Column(name = "technician_id", updatable = false)
+    private UUID technicianId;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
@@ -57,25 +83,67 @@ public class ServiceRequestApplication {
     protected ServiceRequestApplication() {
     }
 
-    private ServiceRequestApplication(UUID serviceRequestId, UUID providerId, Instant now) {
+    private ServiceRequestApplication(UUID serviceRequestId, UUID providerId, ProviderType providerType,
+                                      UUID technicianId, BigDecimal proposedAmount, CurrencyCode currency,
+                                      Instant now) {
         this.serviceRequestId = serviceRequestId;
         this.providerId = providerId;
+        this.providerType = providerType;
+        this.technicianId = technicianId;
+        this.proposedAmount = proposedAmount.setScale(Quotation.AMOUNT_SCALE);
+        this.currency = currency;
         this.status = ApplicationStatus.APPLIED;
         this.createdAt = now;
         this.updatedAt = now;
     }
 
     /**
-     * Registra la postulación del técnico en estado {@code APPLIED}.
+     * Registra la postulación del técnico en estado {@code APPLIED}, con el precio que propone. El precio sigue las
+     * mismas reglas que el valor de una cotización: mayor que cero, máximo dos decimales y moneda explícita.
      *
      * @throws ServiceRequestNotAvailableException si la solicitud ya no recibe postulaciones
-     * @throws IllegalArgumentException            si falta la solicitud o el técnico
+     * @throws IllegalArgumentException            si falta la solicitud o el técnico, o el precio no es válido
      */
-    public static ServiceRequestApplication submit(ServiceRequest request, UUID providerId, Instant now) {
-        require(request != null && request.getId() != null, "La solicitud es obligatoria");
+    public static ServiceRequestApplication submit(ServiceRequest request, UUID providerId, BigDecimal proposedAmount,
+                                                   CurrencyCode currency, Instant now) {
         require(providerId != null, "El técnico es obligatorio");
+        requireValid(request, proposedAmount, currency, now);
+        return new ServiceRequestApplication(request.getId(), providerId, ProviderType.INDEPENDENT, null,
+                proposedAmount, currency, now);
+    }
+
+    /**
+     * Registra la postulación de una empresa (GC-468): la empresa ({@code users.id} de la cuenta que la administra) es
+     * el prestador y propone a uno de sus técnicos asociados como ejecutor. Que el técnico sea de esa empresa y
+     * elegible lo comprueba ms-users antes de llegar aquí. Mismas reglas de solicitud y precio que la de un
+     * independiente.
+     *
+     * @throws ServiceRequestNotAvailableException si la solicitud ya no recibe postulaciones
+     * @throws IllegalArgumentException            si falta un dato, el precio no es válido o la empresa se propone a
+     *                                             sí misma como técnico
+     */
+    public static ServiceRequestApplication submitForCompany(ServiceRequest request, UUID companyId,
+                                                             UUID technicianId, BigDecimal proposedAmount,
+                                                             CurrencyCode currency, Instant now) {
+        require(companyId != null, "La empresa es obligatoria");
+        require(technicianId != null, "El técnico propuesto es obligatorio");
+        require(!technicianId.equals(companyId), "La empresa no puede proponerse a sí misma como técnico");
+        requireValid(request, proposedAmount, currency, now);
+        return new ServiceRequestApplication(request.getId(), companyId, ProviderType.COMPANY, technicianId,
+                proposedAmount, currency, now);
+    }
+
+    private static void requireValid(ServiceRequest request, BigDecimal proposedAmount, CurrencyCode currency,
+                                     Instant now) {
+        require(request != null && request.getId() != null, "La solicitud es obligatoria");
+        require(proposedAmount != null, "El precio propuesto es obligatorio");
+        require(proposedAmount.signum() > 0, "El precio propuesto debe ser mayor que cero");
+        require(proposedAmount.stripTrailingZeros().scale() <= Quotation.AMOUNT_SCALE,
+                "El precio propuesto admite máximo dos decimales");
+        require(proposedAmount.compareTo(Quotation.MAX_AMOUNT) <= 0,
+                "El precio propuesto no puede superar " + Quotation.MAX_AMOUNT.toPlainString());
+        require(currency != null, "La moneda es obligatoria");
         requireOpen(request, now);
-        return new ServiceRequestApplication(request.getId(), providerId, now);
     }
 
     /**
@@ -132,6 +200,30 @@ public class ServiceRequestApplication {
 
     public ApplicationStatus getStatus() {
         return status;
+    }
+
+    public ProviderType getProviderType() {
+        return providerType;
+    }
+
+    /** {@code null} si se postuló un técnico independiente. */
+    public UUID getTechnicianId() {
+        return technicianId;
+    }
+
+    /** El técnico que haría el trabajo: el propuesto por la empresa o el propio independiente. */
+    public UUID getExecutorId() {
+        return providerType == ProviderType.COMPANY ? technicianId : providerId;
+    }
+
+    /** {@code null} en postulaciones anteriores a GC-423. */
+    public BigDecimal getProposedAmount() {
+        return proposedAmount;
+    }
+
+    /** {@code null} en postulaciones anteriores a GC-423. */
+    public CurrencyCode getCurrency() {
+        return currency;
     }
 
     public Instant getCreatedAt() {

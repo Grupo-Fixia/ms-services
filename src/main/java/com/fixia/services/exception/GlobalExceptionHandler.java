@@ -1,6 +1,7 @@
 package com.fixia.services.exception;
 
 import com.fixia.services.client.EligibilityCheckException;
+import com.fixia.services.client.ProfileLookupException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -61,6 +62,14 @@ public class GlobalExceptionHandler {
         if (ex instanceof MethodArgumentTypeMismatchException mismatch && "quotationId".equals(mismatch.getName())) {
             return handleQuotationNotFound(new QuotationNotFoundException());
         }
+        // Y con el id de contratación (GC-359).
+        if (ex instanceof MethodArgumentTypeMismatchException mismatch && "contractId".equals(mismatch.getName())) {
+            return handleContractNotFound(new ContractNotFoundException());
+        }
+        // Y con el id de evidencia (GC-439).
+        if (ex instanceof MethodArgumentTypeMismatchException mismatch && "evidenceId".equals(mismatch.getName())) {
+            return handleEvidenceNotFound(new EvidenceNotFoundException());
+        }
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.NOT_FOUND, "No existe la solicitud indicada");
         problem.setTitle("Solicitud no encontrada");
@@ -69,6 +78,13 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(InvalidOpportunityQueryException.class)
     public ProblemDetail handleInvalidOpportunityQuery(InvalidOpportunityQueryException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Consulta inválida");
+        return problem;
+    }
+
+    @ExceptionHandler(InvalidHistoryQueryException.class)
+    public ProblemDetail handleInvalidHistoryQuery(InvalidHistoryQueryException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
         problem.setTitle("Consulta inválida");
         return problem;
@@ -96,6 +112,38 @@ public class GlobalExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
                 "No fue posible verificar tu elegibilidad. Intenta de nuevo en unos minutos");
         problem.setTitle("Elegibilidad no verificable");
+        return problem;
+    }
+
+    /** Sin perfiles de ms-users no se muestran postulantes a medias ni con datos inventados (GC-425). */
+    @ExceptionHandler(ProfileLookupException.class)
+    public ProblemDetail handleProfilesUnavailable(ProfileLookupException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
+                "No fue posible consultar el perfil de los postulantes. Intenta de nuevo en unos minutos");
+        problem.setTitle("Perfiles no disponibles");
+        return problem;
+    }
+
+    /** Sin respuesta de matching no se sugieren técnicos a medias ni una lista vacía engañosa (GC-474). */
+    @ExceptionHandler(MatchingLookupException.class)
+    public ProblemDetail handleMatchingUnavailable(MatchingLookupException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
+                "No fue posible consultar los técnicos compatibles. Intenta de nuevo en unos minutos");
+        problem.setTitle("Técnicos compatibles no disponibles");
+        return problem;
+    }
+
+    @ExceptionHandler(InvalidMatchingQueryException.class)
+    public ProblemDetail handleInvalidMatchingQuery(InvalidMatchingQueryException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Consulta inválida");
+        return problem;
+    }
+
+    @ExceptionHandler(InvalidApplicationException.class)
+    public ProblemDetail handleInvalidApplication(InvalidApplicationException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Postulación inválida");
         return problem;
     }
 
@@ -143,6 +191,83 @@ public class GlobalExceptionHandler {
     public ProblemDetail handleQuotationNotAllowed(QuotationNotAllowedException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
         problem.setTitle("Cotización no permitida");
+        return problem;
+    }
+
+    @ExceptionHandler(InvalidQuotationTransitionException.class)
+    public ProblemDetail handleInvalidQuotationTransition(InvalidQuotationTransitionException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Cambio de estado no permitido");
+        return problem;
+    }
+
+    /**
+     * La solicitud no está en un estado desde el que se pueda hacer lo pedido (por ejemplo, iniciar un servicio que no
+     * está contratado). Sin este manejador sería un 500.
+     */
+    @ExceptionHandler(InvalidStatusTransitionException.class)
+    public ProblemDetail handleInvalidStatusTransition(InvalidStatusTransitionException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Transición de estado no permitida");
+        return problem;
+    }
+
+    @ExceptionHandler(ContractNotFoundException.class)
+    public ProblemDetail handleContractNotFound(ContractNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Contratación no encontrada");
+        return problem;
+    }
+
+    @ExceptionHandler(InvalidEvidenceException.class)
+    public ProblemDetail handleInvalidEvidence(InvalidEvidenceException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Evidencia inválida");
+        return problem;
+    }
+
+    @ExceptionHandler(EvidenceLimitExceededException.class)
+    public ProblemDetail handleEvidenceLimitExceeded(EvidenceLimitExceededException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Límite de evidencias alcanzado");
+        return problem;
+    }
+
+    @ExceptionHandler(EvidenceNotAllowedException.class)
+    public ProblemDetail handleEvidenceNotAllowed(EvidenceNotAllowedException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Evidencia no permitida");
+        return problem;
+    }
+
+    @ExceptionHandler(EvidenceNotFoundException.class)
+    public ProblemDetail handleEvidenceNotFound(EvidenceNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Evidencia no encontrada");
+        return problem;
+    }
+
+    @ExceptionHandler(StorageUnavailableException.class)
+    public ProblemDetail handleStorageUnavailable(StorageUnavailableException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
+                "El almacenamiento de evidencias no está disponible. Intente de nuevo en unos minutos");
+        problem.setTitle("Almacenamiento no disponible");
+        return problem;
+    }
+
+    @ExceptionHandler(EvidenceIntegrityException.class)
+    public ProblemDetail handleEvidenceIntegrity(EvidenceIntegrityException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR,
+                "No fue posible verificar la integridad de la evidencia");
+        problem.setTitle("Integridad de la evidencia");
+        return problem;
+    }
+
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    public ProblemDetail handleMaxUploadSize(org.springframework.web.multipart.MaxUploadSizeExceededException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST,
+                "El archivo excede el tamaño máximo permitido de 10 MB");
+        problem.setTitle("Archivo demasiado grande");
         return problem;
     }
 }

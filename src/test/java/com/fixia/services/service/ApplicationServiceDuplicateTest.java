@@ -3,6 +3,7 @@ package com.fixia.services.service;
 import com.fixia.services.client.TechnicianEligibilityClient;
 import com.fixia.services.domain.ApproximateLocation;
 import com.fixia.services.domain.ServiceCategory;
+import com.fixia.services.domain.CurrencyCode;
 import com.fixia.services.domain.ServiceRequest;
 import com.fixia.services.domain.ServiceRequestApplication;
 import com.fixia.services.exception.DuplicateApplicationException;
@@ -15,6 +16,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.transaction.support.TransactionCallback;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.math.BigDecimal;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Duration;
@@ -36,6 +38,8 @@ import static org.mockito.Mockito.when;
  */
 class ApplicationServiceDuplicateTest {
 
+    private static final BigDecimal PRICE = new BigDecimal("150000");
+
     private static final Instant NOW = Instant.parse("2026-10-17T15:00:00Z");
     private static final UUID TECHNICIAN = UUID.randomUUID();
 
@@ -43,7 +47,9 @@ class ApplicationServiceDuplicateTest {
     private final ServiceRequestApplicationRepository applications = mock(ServiceRequestApplicationRepository.class);
     private final TechnicianEligibilityClient eligibility = mock(TechnicianEligibilityClient.class);
     private final TransactionTemplate transactions = mock(TransactionTemplate.class);
+    private final BusinessEventRecorder events = mock(BusinessEventRecorder.class);
     private final ApplicationService service = new ApplicationService(requests, applications, eligibility,
+            mock(com.fixia.services.client.CompanyClient.class), events,
             transactions, Clock.fixed(NOW, ZoneOffset.UTC));
 
     private ServiceRequest request;
@@ -52,7 +58,8 @@ class ApplicationServiceDuplicateTest {
     @SuppressWarnings("unchecked")
     void setUp() {
         request = ServiceRequest.publish(UUID.randomUUID(), ServiceCategory.PLUMBING, "Fuga",
-                new ApproximateLocation("Bogotá", "Chapinero"), null, NOW.plus(Duration.ofDays(2)), List.of(),
+                new ApproximateLocation("Bogotá", "Chapinero"), null, NOW.plus(Duration.ofDays(2)),
+                new BigDecimal("200000"), CurrencyCode.COP, List.of(),
                 NOW.minusSeconds(60));
         ReflectionTestUtils.setField(request, "id", UUID.randomUUID());
         when(requests.findById(request.getId())).thenReturn(Optional.of(request));
@@ -73,7 +80,7 @@ class ApplicationServiceDuplicateTest {
         when(applications.saveAndFlush(any())).thenThrow(violation(
                 "duplicate key value violates unique constraint \"uk_applications\""));
 
-        assertThatThrownBy(() -> service.apply(TECHNICIAN, request.getId()))
+        assertThatThrownBy(() -> service.apply(TECHNICIAN, request.getId(), PRICE, CurrencyCode.COP))
                 .isInstanceOf(DuplicateApplicationException.class)
                 .hasMessage("Ya te postulaste a esta solicitud");
     }
@@ -83,7 +90,7 @@ class ApplicationServiceDuplicateTest {
         DataIntegrityViolationException other = violation("violates check constraint \"ck_applications_status\"");
         when(applications.saveAndFlush(any())).thenThrow(other);
 
-        assertThatThrownBy(() -> service.apply(TECHNICIAN, request.getId())).isSameAs(other);
+        assertThatThrownBy(() -> service.apply(TECHNICIAN, request.getId(), PRICE, CurrencyCode.COP)).isSameAs(other);
     }
 
     @Test

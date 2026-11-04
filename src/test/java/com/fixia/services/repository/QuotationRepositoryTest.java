@@ -62,7 +62,7 @@ class QuotationRepositoryTest {
         Instant now = now();
         ServiceRequest request = serviceRequestRepository.saveAndFlush(ServiceRequest.publish(UUID.randomUUID(),
                 ServiceCategory.PLUMBING, "Fuga de agua en el baño", new ApproximateLocation("Bogotá", "Chapinero"),
-                null, now.plus(Duration.ofDays(5)), List.of(), now));
+                null, now.plus(Duration.ofDays(5)), new BigDecimal("200000"), CurrencyCode.COP, List.of(), now));
         return transactionTemplate.execute(status -> {
             ServiceRequest found = serviceRequestRepository.findById(request.getId()).orElseThrow();
             found.selectProvider(PROVIDER, now());
@@ -73,7 +73,7 @@ class QuotationRepositoryTest {
     private Quotation send(ServiceRequest request, Instant now) {
         return quotationRepository.saveAndFlush(Quotation.send(request, PROVIDER, new BigDecimal("350000.5"),
                 CurrencyCode.COP, "Cambio de tubería", "Incluye materiales", now.plus(Duration.ofDays(3)),
-                now.plus(Duration.ofDays(1)), now));
+                now.plus(Duration.ofDays(1)), quotationRepository.maxRevision(request.getId()) + 1, now));
     }
 
     @Test
@@ -119,12 +119,43 @@ class QuotationRepositoryTest {
         Quotation second = send(request, base);
         send(selectedRequest(), base);
 
-        assertThat(quotationRepository.findByServiceRequestIdOrderByCreatedAtDesc(request.getId()))
+        assertThat(quotationRepository.findByServiceRequestIdOrderByRevisionDesc(request.getId()))
                 .extracting(Quotation::getId).containsExactly(second.getId(), first.getId());
         assertThat(quotationRepository.findFirstByServiceRequestIdAndStatusOrderByCreatedAtDesc(
                 request.getId(), QuotationStatus.SENT)).map(Quotation::getId).contains(second.getId());
         assertThat(quotationRepository.findFirstByServiceRequestIdAndStatusOrderByCreatedAtDesc(
                 request.getId(), QuotationStatus.ACCEPTED)).isEmpty();
+    }
+
+    @Test
+    void laVersionMasAltaDeLaSolicitudSeConsultaYEmpiezaEnCero() {
+        ServiceRequest request = selectedRequest();
+        assertThat(quotationRepository.maxRevision(request.getId())).isZero();
+
+        send(request, now());
+        send(request, now());
+
+        assertThat(quotationRepository.maxRevision(request.getId())).isEqualTo(2);
+        assertThat(quotationRepository.maxRevision(selectedRequest().getId())).isZero();
+    }
+
+    @Test
+    void laBaseRechazaVersionesRepetidasEnUnaSolicitudNulasOMenoresQueUno() {
+        ServiceRequest request = selectedRequest();
+        Quotation first = send(request, now());
+        Instant now = now();
+
+        // La misma versión 1 otra vez en la misma solicitud: restricción única (solicitud, versión).
+        assertThatThrownBy(() -> quotationRepository.saveAndFlush(Quotation.send(request, PROVIDER,
+                new BigDecimal("1000"), CurrencyCode.COP, "a", "b", now.plus(Duration.ofDays(3)),
+                now.plus(Duration.ofDays(1)), 1, now))).isInstanceOf(DataIntegrityViolationException.class);
+        // En otra solicitud la versión 1 sí es válida.
+        send(selectedRequest(), now());
+
+        assertThatThrownBy(() -> jdbcTemplate.update("UPDATE quotations SET revision = 0 WHERE id = ?", first.getId()))
+                .isInstanceOf(DataIntegrityViolationException.class);
+        assertThatThrownBy(() -> jdbcTemplate.update("UPDATE quotations SET revision = NULL WHERE id = ?",
+                first.getId())).isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
@@ -173,11 +204,15 @@ class QuotationRepositoryTest {
                 .isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> jdbcTemplate.update("INSERT INTO quotations (id, service_request_id, provider_id, "
                         + "amount, currency, scope, conditions, agreed_at, valid_until, status, created_at, updated_at, "
-                        + "version) VALUES (?, ?, ?, 100, 'COP', 'a', 'b', ?, ?, 'SENT', ?, ?, 0)",
+                        + "version, revision) VALUES (?, ?, ?, 100, 'COP', 'a', 'b', ?, ?, 'SENT', ?, ?, 0, "
+                        + (++revisionSeq) + ")",
                 UUID.randomUUID(), request, PROVIDER, ts(now()), ts(now().plusSeconds(60)), ts(now()), ts(now())))
                 .isInstanceOf(DataIntegrityViolationException.class);
         assertThat(insert(request, "100", "COP", "ACCEPTED", ts(now()))).isEqualTo(1);
     }
+
+    /** Versión distinta en cada INSERT directo: la restricción única (solicitud, versión) no debe ser la que falle. */
+    private int revisionSeq = 0;
 
     private int insert(UUID request, String amount, String currency, String status, java.sql.Timestamp respondedAt) {
         return jdbcTemplate.update(insertSql(), UUID.randomUUID(), request, PROVIDER, amount, currency, status,
@@ -187,10 +222,10 @@ class QuotationRepositoryTest {
     private String insertSql() {
         Instant now = now();
         return "INSERT INTO quotations (id, service_request_id, provider_id, amount, currency, scope, conditions, "
-                + "agreed_at, valid_until, status, responded_at, created_at, updated_at, version) "
+                + "agreed_at, valid_until, status, responded_at, created_at, updated_at, version, revision) "
                 + "VALUES (?, ?, ?, CAST(? AS NUMERIC(12, 2)), ?, 'a', 'b', TIMESTAMP WITH TIME ZONE '"
                 + now.plus(Duration.ofDays(3)) + "', TIMESTAMP WITH TIME ZONE '" + now.plus(Duration.ofDays(1))
-                + "', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0)";
+                + "', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, " + (++revisionSeq) + ")";
     }
 
     private static java.sql.Timestamp ts(Instant instant) {

@@ -1,11 +1,14 @@
 package com.fixia.services.service;
 
+import com.fixia.services.domain.ActorRole;
 import com.fixia.services.domain.Quotation;
 import com.fixia.services.domain.QuotationStatus;
+import com.fixia.services.domain.ServiceContract;
 import com.fixia.services.domain.ServiceRequest;
 import com.fixia.services.domain.ServiceRequestStatus;
 import com.fixia.services.dto.CreateQuotationRequest;
 import com.fixia.services.exception.InvalidQuotationException;
+import com.fixia.services.exception.InvalidQuotationTransitionException;
 import com.fixia.services.exception.QuotationNotAllowedException;
 import com.fixia.services.exception.QuotationNotFoundException;
 import com.fixia.services.exception.ServiceRequestNotFoundException;
@@ -21,19 +24,26 @@ import java.util.UUID;
 
 /**
  * Cotizaciones (GC-354): el prestador seleccionado las crea y envía; él y el cliente dueño de la solicitud las
- * consultan. Aceptar o rechazar es GC-358. Los actores siempre salen del token, nunca del cuerpo.
+ * consultan. El cliente las acepta o rechaza (GC-358). Los actores siempre salen del token, nunca del cuerpo.
  */
 @Service
 public class QuotationService {
 
     private final ServiceRequestRepository serviceRequestRepository;
     private final QuotationRepository quotationRepository;
+    private final ContractService contractService;
+    private final ServiceRequestHistory history;
+    private final BusinessEventRecorder events;
     private final Clock clock;
 
     public QuotationService(ServiceRequestRepository serviceRequestRepository,
-                            QuotationRepository quotationRepository, Clock clock) {
+                            QuotationRepository quotationRepository, ContractService contractService,
+                            ServiceRequestHistory history, BusinessEventRecorder events, Clock clock) {
         this.serviceRequestRepository = serviceRequestRepository;
         this.quotationRepository = quotationRepository;
+        this.contractService = contractService;
+        this.history = history;
+        this.events = events;
         this.clock = clock;
     }
 
@@ -67,32 +77,38 @@ public class QuotationService {
         }
 
         Instant now = clock.instant();
+        // La solicitud ya está bloqueada: nadie más puede enviar o responder a la vez, así que máximo + 1 no se repite.
+        int revision = quotationRepository.maxRevision(request.getId()) + 1;
         Quotation quotation;
         try {
             quotation = Quotation.send(request, providerId, body.amount(), body.currency(), body.scope(),
-                    body.conditions(), body.agreedAt(), body.validUntil(), now);
+                    body.conditions(), body.agreedAt(), body.validUntil(), revision, now);
         } catch (IllegalArgumentException e) {
             // Reglas del dominio que la validación del cuerpo no cubre (fechas frente al reloj del servicio).
             throw new InvalidQuotationException(e.getMessage(), e);
         }
 
-        for (Quotation previous : quotationRepository.findByServiceRequestIdAndStatus(request.getId(),
-                QuotationStatus.SENT)) {
+        List<Quotation> replaced = quotationRepository.findByServiceRequestIdAndStatus(request.getId(),
+                QuotationStatus.SENT);
+        for (Quotation previous : replaced) {
             if (previous.isExpiredAt(now)) {
                 previous.expire(now);
             } else {
                 previous.supersede(now);
             }
         }
-        return quotationRepository.save(quotation);
+        Quotation saved = quotationRepository.save(quotation);
+        events.record(BusinessEvents.quotationSent(saved, request.getClientId(), replaced), request.getId(),
+                BusinessEvents.Actor.professional(providerId), saved.getCreatedAt());
+        return saved;
     }
 
     /** Cotizaciones del prestador, opcionalmente de una sola solicitud, la más reciente primero. */
     @Transactional(readOnly = true)
     public List<Quotation> listMine(UUID providerId, UUID serviceRequestId) {
         return serviceRequestId == null
-                ? quotationRepository.findByProviderIdOrderByCreatedAtDesc(providerId)
-                : quotationRepository.findByProviderIdAndServiceRequestIdOrderByCreatedAtDesc(providerId,
+                ? quotationRepository.findByProviderIdOrderByCreatedAtDescIdDesc(providerId)
+                : quotationRepository.findByProviderIdAndServiceRequestIdOrderByRevisionDesc(providerId,
                 serviceRequestId);
     }
 
@@ -112,7 +128,98 @@ public class QuotationService {
         serviceRequestRepository.findById(serviceRequestId)
                 .filter(request -> request.getClientId().equals(clientId))
                 .orElseThrow(ServiceRequestNotFoundException::new);
-        return quotationRepository.findByServiceRequestIdOrderByCreatedAtDesc(serviceRequestId);
+        return quotationRepository.findByServiceRequestIdOrderByRevisionDesc(serviceRequestId);
+    }
+
+    /**
+     * El cliente acepta una cotización de su solicitud (GC-358) y, en la misma transacción, Fixia formaliza la
+     * contratación (GC-359, CA-03): la solicitud pasa a {@code CONTRACTED} (desde ahí se entrega la dirección exacta) y
+     * queda guardada una copia de lo acordado. Nada queda a medias: si algo falla, la cotización sigue enviada.
+     */
+    @Transactional
+    public Quotation accept(UUID clientId, UUID serviceRequestId, UUID quotationId) {
+        return respond(clientId, serviceRequestId, quotationId, QuotationStatus.ACCEPTED);
+    }
+
+    /**
+     * El cliente rechaza una cotización de su solicitud (GC-358). La solicitud sigue con su prestador seleccionado,
+     * que puede enviar otra cotización.
+     */
+    @Transactional
+    public Quotation reject(UUID clientId, UUID serviceRequestId, UUID quotationId) {
+        return respond(clientId, serviceRequestId, quotationId, QuotationStatus.REJECTED);
+    }
+
+    /**
+     * Respuesta del cliente a una cotización, con la solicitud bloqueada hasta el fin de la transacción (la misma
+     * fila que toman el envío, la postulación y la selección): dos respuestas simultáneas, o una respuesta y un envío
+     * nuevo, no se cruzan.
+     *
+     * <ol>
+     *   <li>La solicitud debe ser del cliente y la cotización de esa solicitud; si no, la respuesta es la misma 404
+     *       (no se revela qué existe).
+     *   <li>Repetir la misma respuesta (aceptar una ya aceptada, rechazar una ya rechazada) devuelve el estado
+     *       actual sin cambiar nada, para que reintentar tras perder la respuesta no parezca un fallo. Si una
+     *       cotización aceptada con GC-358 quedó sin contratar (la solicitud sigue con su prestador), repetir la
+     *       aceptación completa la contratación.
+     *   <li>La cotización debe estar enviada: una rechazada, reemplazada, vencida o ya respondida de otra forma no se
+     *       acepta ni se rechaza (409), de modo que ninguna versión anterior o modificada se acepta sin una nueva
+     *       cotización (RF-033).
+     *   <li>La solicitud debe seguir con prestador seleccionado, y la cotización ser de ese prestador (409).
+     *   <li>Aceptar exige que no haya ya otra aceptada (409) y que la cotización esté vigente.
+     * </ol>
+     */
+    private Quotation respond(UUID clientId, UUID serviceRequestId, UUID quotationId, QuotationStatus decision) {
+        ServiceRequest request = serviceRequestRepository.findByIdAndClientIdForUpdate(serviceRequestId, clientId)
+                .orElseThrow(ServiceRequestNotFoundException::new);
+        Quotation quotation = quotationRepository.findByIdAndServiceRequestId(quotationId, request.getId())
+                .orElseThrow(QuotationNotFoundException::new);
+        Instant now = clock.instant();
+        if (quotation.getStatus() == decision) {
+            if (decision == QuotationStatus.ACCEPTED && isAwaitingContract(request, quotation)) {
+                contract(request, quotation, now);
+            }
+            return quotation;
+        }
+        if (quotation.getStatus() != QuotationStatus.SENT) {
+            throw new InvalidQuotationTransitionException(quotation.getStatus(), decision);
+        }
+        if (!isAwaitingContract(request, quotation)) {
+            throw new QuotationNotAllowedException("La solicitud ya no admite responder cotizaciones");
+        }
+        if (decision == QuotationStatus.ACCEPTED) {
+            if (quotationRepository.findFirstByServiceRequestIdAndStatusOrderByCreatedAtDesc(request.getId(),
+                    QuotationStatus.ACCEPTED).isPresent()) {
+                throw new QuotationNotAllowedException("La solicitud ya tiene una cotización aceptada");
+            }
+            quotation.accept(now);
+            contract(request, quotation, now);
+        } else {
+            quotation.reject(now);
+            events.record(BusinessEvents.quotationRejected(quotation, clientId), request.getId(),
+                    BusinessEvents.Actor.client(clientId), now);
+        }
+        return quotation;
+    }
+
+    /** La solicitud sigue con su prestador seleccionado y la cotización es la de ese prestador. */
+    private static boolean isAwaitingContract(ServiceRequest request, Quotation quotation) {
+        return request.getStatus() == ServiceRequestStatus.PROVIDER_SELECTED
+                && quotation.getProviderId().equals(request.getSelectedProviderId());
+    }
+
+    /**
+     * Formaliza la contratación: la solicitud pasa a {@code CONTRACTED}, se guarda lo acordado (GC-359) y se registra
+     * {@code servicio.contratado} (GC-433) y la transición queda en el historial (GC-437). Es el único lugar donde nace
+     * un contrato, así que el evento y el historial salen una sola vez aunque la aceptación se repita.
+     */
+    private void contract(ServiceRequest request, Quotation quotation, Instant now) {
+        request.contract(now);
+        history.record(request.getId(), ServiceRequestStatus.PROVIDER_SELECTED, ServiceRequestStatus.CONTRACTED,
+                request.getClientId(), ActorRole.CLIENT, null, now);
+        ServiceContract contract = contractService.formalize(request, quotation, now);
+        events.record(BusinessEvents.serviceContracted(contract), request.getId(),
+                BusinessEvents.Actor.client(request.getClientId()), contract.getContractedAt());
     }
 
     /** El instante con el que se calcula, al responder, si una cotización enviada ya venció. */

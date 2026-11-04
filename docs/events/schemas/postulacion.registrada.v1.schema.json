@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fixia.local/schemas/events/postulacion.registrada.v1.schema.json",
+  "title": "postulacion.registrada (versión 1)",
+  "description": "Un prestador se postuló a una solicitud con su precio propuesto (RF-024, GC-423): un técnico independiente o una empresa que propone a uno de sus técnicos asociados (GC-468). Postularse no asigna el trabajo (RN-002).",
+  "allOf": [
+    {
+      "$ref": "https://fixia.local/schemas/events/envelope.v1.schema.json"
+    }
+  ],
+  "properties": {
+    "eventType": {
+      "const": "postulacion.registrada"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "actor": {
+      "properties": {
+        "role": {
+          "enum": [
+            "PROFESSIONAL",
+            "COMPANY"
+          ]
+        }
+      }
+    },
+    "data": {
+      "type": "object",
+      "required": [
+        "applicationId",
+        "serviceRequestId",
+        "providerId",
+        "status",
+        "proposedPrice",
+        "appliedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "applicationId": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
+        },
+        "serviceRequestId": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
+        },
+        "providerId": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
+        },
+        "status": {
+          "const": "APPLIED"
+        },
+        "proposedPrice": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/money"
+        },
+        "appliedAt": {
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/instant"
+        },
+        "providerType": {
+          "type": "string",
+          "enum": [
+            "INDEPENDENT",
+            "COMPANY"
+          ],
+          "description": "Opcional (GC-468). Ausente en eventos anteriores, que son de técnicos independientes."
+        },
+        "technicianId": {
+          "oneOf": [
+            {
+              "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opcional (GC-468). Técnico que la empresa propone como ejecutor; null si es independiente."
+        }
+      }
+    }
+  }
+}

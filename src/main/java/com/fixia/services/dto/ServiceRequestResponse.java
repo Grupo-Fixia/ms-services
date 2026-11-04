@@ -2,18 +2,21 @@ package com.fixia.services.dto;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fixia.services.domain.ApproximateLocation;
+import com.fixia.services.domain.CurrencyCode;
 import com.fixia.services.domain.ExactLocation;
 import com.fixia.services.domain.ServiceCategory;
 import com.fixia.services.domain.ServiceRequest;
 import com.fixia.services.domain.ServiceRequestStatus;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
 /**
  * Solicitud tal como la ve su cliente. La dirección exacta solo aparece cuando la solicitud ya está
- * contratada ({@link ServiceRequest#getExactLocation()}); antes no se entrega a nadie.
+ * contratada ({@link ServiceRequest#getExactLocation()}); antes no se entrega a nadie. El presupuesto orientativo
+ * (GC-421) llega en {@code null} en las solicitudes anteriores a él.
  */
 public record ServiceRequestResponse(
         UUID id,
@@ -23,6 +26,8 @@ public record ServiceRequestResponse(
         ApproximateLocationResponse approximateLocation,
         @JsonInclude(JsonInclude.Include.NON_NULL) ExactLocationResponse exactLocation,
         Instant expectedAt,
+        BigDecimal budgetAmount,
+        CurrencyCode budgetCurrency,
         List<String> photoKeys,
         @JsonInclude(JsonInclude.Include.NON_NULL) UUID selectedProviderId,
         Instant publishedAt,
@@ -53,6 +58,8 @@ public record ServiceRequestResponse(
                 ApproximateLocationResponse.from(request.getApproximateLocation()),
                 request.getExactLocation().map(ExactLocationResponse::from).orElse(null),
                 request.getExpectedAt(),
+                request.getBudgetAmount(),
+                request.getBudgetCurrency(),
                 request.getPhotoKeys(),
                 request.getSelectedProviderId(),
                 request.getPublishedAt(),

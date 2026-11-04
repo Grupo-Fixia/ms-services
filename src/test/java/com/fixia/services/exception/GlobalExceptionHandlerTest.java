@@ -1,5 +1,6 @@
 package com.fixia.services.exception;
 
+import com.fixia.services.domain.QuotationStatus;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
@@ -27,5 +28,15 @@ class GlobalExceptionHandlerTest {
         assertThat(problem.getStatus()).isEqualTo(HttpStatus.NOT_FOUND.value());
         assertThat(problem.getTitle()).isEqualTo("Solicitud no encontrada");
         assertThat(problem.getDetail()).isEqualTo("No existe la solicitud indicada");
+    }
+
+    @Test
+    void unCambioDeEstadoInvalidoDeUnaCotizacionEsUn409ConSuMensaje() {
+        ProblemDetail problem = handler.handleInvalidQuotationTransition(new InvalidQuotationTransitionException(
+                QuotationStatus.REJECTED, QuotationStatus.ACCEPTED));
+
+        assertThat(problem.getStatus()).isEqualTo(HttpStatus.CONFLICT.value());
+        assertThat(problem.getTitle()).isEqualTo("Cambio de estado no permitido");
+        assertThat(problem.getDetail()).contains("REJECTED").contains("ACCEPTED");
     }
 }
