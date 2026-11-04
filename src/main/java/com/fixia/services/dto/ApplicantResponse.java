@@ -33,17 +33,20 @@ public record ApplicantResponse(
 
     /**
      * Perfil público del prestador que entrega ms-users (GC-425): solo lo necesario para comparar, sin datos de
-     * contacto ni ubicación. {@code null} si ms-users ya no lo reconoce como técnico activo.
+     * contacto ni ubicación. {@code null} si ms-users ya no lo reconoce como técnico activo. {@code reputation}
+     * (GC-446) es la que calcula ms-users de las evaluaciones reales, o {@code null} si el técnico aún no tiene; una
+     * empresa no tiene reputación propia en este sprint (no se evalúan servicios de empresa).
      */
     public record ProviderProfile(String displayName, String verificationStatus, List<ServiceCategory> categories,
-                                  String professionalDescription, Integer yearsOfExperience, String city) {
+                                  String professionalDescription, Integer yearsOfExperience, String city,
+                                  TechnicianProfileClient.Reputation reputation) {
 
         /** Una empresa solo expone su nombre comercial (GC-468); el resto del perfil es del técnico ejecutor. */
         static ProviderProfile ofCompany(CompanyClient.CompanyProfile profile) {
             if (profile == null) {
                 return null;
             }
-            return new ProviderProfile(profile.name(), null, List.of(), null, null, null);
+            return new ProviderProfile(profile.name(), null, List.of(), null, null, null, null);
         }
 
         static ProviderProfile from(TechnicianProfileClient.PublicProfile profile) {
@@ -52,7 +55,8 @@ public record ApplicantResponse(
             }
             return new ProviderProfile(profile.displayName(), profile.verificationStatus(),
                     profile.categories() == null ? List.of() : profile.categories(),
-                    profile.professionalDescription(), profile.yearsOfExperience(), profile.city());
+                    profile.professionalDescription(), profile.yearsOfExperience(), profile.city(),
+                    profile.reputation());
         }
     }
 
