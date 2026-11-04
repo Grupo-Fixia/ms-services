@@ -118,6 +118,7 @@ class InternalParticipationControllerTest {
         mockMvc.perform(post("/api/services/requests/" + saved.getId() + "/quotations/" + quotation.getId()
                 + "/acceptance").with(user(CLIENT, "ROLE_CLIENT"))).andExpect(status().isOk());
         ServiceContract contract = contractRepository.findByServiceRequestId(saved.getId()).orElseThrow();
+        ContractPayments.hold(jdbcTemplate, contract.getId());
         mockMvc.perform(post("/api/services/contracts/" + contract.getId() + "/start")
                 .with(user(PROVIDER, "ROLE_PROFESSIONAL"))).andExpect(status().isOk());
         mockMvc.perform(post("/api/services/contracts/" + contract.getId() + "/finish")

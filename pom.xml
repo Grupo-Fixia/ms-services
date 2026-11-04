@@ -105,6 +105,12 @@
             <artifactId>h2</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Broker Kafka en memoria para probar el consumidor de pagos de punta a punta (GC-490) -->
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka-test</artifactId>
+            <scope>test</scope>
+        </dependency>
         <!-- Valida en las pruebas cada evento del Outbox contra los esquemas de docs/events (GC-433, GC-436) -->
         <dependency>
             <groupId>com.networknt</groupId>

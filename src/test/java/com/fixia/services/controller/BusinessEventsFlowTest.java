@@ -244,6 +244,7 @@ class BusinessEventsFlowTest {
         JsonNode contract = objectMapper.readTree(mockMvc.perform(
                         get("/api/services/requests/" + request + "/contract").with(as(CLIENT, "ROLE_CLIENT")))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        ContractPayments.hold(jdbcTemplate, UUID.fromString(contract.get("id").asText()));
         String start = "/api/services/contracts/" + contract.get("id").asText() + "/start";
 
         send(start, ANA, "ROLE_PROFESSIONAL", null).andExpect(status().isOk());
@@ -279,6 +280,7 @@ class BusinessEventsFlowTest {
         JsonNode contract = objectMapper.readTree(mockMvc.perform(
                         get("/api/services/requests/" + request + "/contract").with(as(CLIENT, "ROLE_CLIENT")))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+        ContractPayments.hold(jdbcTemplate, UUID.fromString(contract.get("id").asText()));
         String base = "/api/services/contracts/" + contract.get("id").asText();
 
         send(base + "/start", ANA, "ROLE_PROFESSIONAL", null).andExpect(status().isOk());

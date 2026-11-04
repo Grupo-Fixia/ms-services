@@ -705,6 +705,11 @@ paths:
         el identificador no es un UUID, la respuesta es la misma 404 "Contratación no encontrada". Desde cualquier otro
         estado que no sea `CONTRACTED` o `IN_PROGRESS`, 409. La dirección exacta sigue entregándose al prestador y al
         cliente mientras el servicio está en curso.
+
+        **Solo se inicia con el saldo retenido (GC-490).** Si ms-payments no ha confirmado la retención (`paymentStatus`
+        `PENDING`) o el pago falló (`FAILED`), la respuesta es 409 "Pago no retenido" con un mensaje que lo explica, y no
+        cambia nada: ni el estado, ni el historial, ni el Outbox. Cuando el cliente recarga y el pago se retiene, el mismo
+        llamado responde 200.
       security:
         - bearerAuth: []
       parameters:
@@ -728,7 +733,9 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '409':
-          description: El servicio no está en un estado desde el que se pueda iniciar (título "Transición de estado no permitida").
+          description: |
+            El servicio no está en un estado desde el que se pueda iniciar (título "Transición de estado no permitida"), o
+            el pago virtual del cliente no está retenido (título "Pago no retenido", GC-490).
           content:
             application/problem+json:
               schema:
@@ -1700,7 +1707,7 @@ components:
       type: object
       description: |
         Contratación formalizada al aceptar una cotización (GC-359): copia inmutable de lo acordado. No trae datos de contacto
-        ni de pago: el pago ocurre fuera de Fixia.
+        ni importes de pago: solo `paymentStatus`, lo que ms-payments confirmó del pago virtual (GC-490).
       properties:
         id: { type: string, format: uuid }
         serviceRequestId: { type: string, format: uuid }
@@ -1717,6 +1724,14 @@ components:
           allOf:
             - $ref: '#/components/schemas/ServiceRequestStatus'
           description: Estado actual del servicio (GC-437); es el mismo `serviceRequest.status`. Lo ven igual el cliente y el prestador.
+        paymentStatus:
+          type: string
+          enum: [PENDING, HELD, FAILED]
+          description: |
+            Estado del pago virtual según lo que ms-payments confirmó (GC-490). `HELD`: el total quedó retenido en la
+            billetera del cliente y el prestador puede iniciar el servicio. `FAILED`: no se pudo retener (p. ej. saldo
+            insuficiente); si el cliente recarga y reintenta, pasa a `HELD`. `PENDING`: ms-payments todavía no ha confirmado
+            nada. Solo `HELD` permite `POST /contracts/{contractId}/start`. Nunca trae importes ni datos de la billetera.
         timeline:
           type: array
           description: |

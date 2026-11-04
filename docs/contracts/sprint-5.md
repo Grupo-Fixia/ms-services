@@ -169,6 +169,14 @@ mismo instante y en la misma transacción que el cambio de estado y el evento.
 - `serviceRequest.exactLocation` sigue llegando solo al prestador contratado (ADR-009) y al cliente dueño, también con el
   servicio en curso (`ServiceRequestStatus#exposesExactLocation()`; GC-441 agrega ahí las etapas siguientes).
 
+### 5.3.1 Pago retenido antes de iniciar (✅ GC-490, migración V16)
+
+- El contrato agrega `paymentStatus`: `PENDING` (ms-payments no ha confirmado), `HELD` (saldo retenido) o `FAILED` (no se
+  pudo retener). Lo ven igual el cliente y el prestador, también en el listado `GET /contracts`.
+- `POST /contracts/{contractId}/start` responde **409 «Pago no retenido»** si no es `HELD`; no cambia estado, historial ni
+  Outbox. Con `HELD` el comportamiento de GC-437 no cambia (incluido el 200 al repetir).
+- Lo alimentan `pago.procesado` y `pago.fallido` de `fixia.payments.events` (ver `docs/events/README.md` §15).
+
 ### 5.4 Contratación: contrato HTTP verificado (✅ GC-430)
 
 Auditoría de la aceptación/rechazo y la formalización (GC-358/359) contra PostgreSQL 16 real y por la API pública, con
@@ -366,8 +374,7 @@ Todos usan el sobre, el tópico y las reglas de idempotencia de GC-436. Los de m
 
 | Repositorio | Siguiente | Para |
 | --- | --- | --- |
-| ms-services | V14 | V8 es el presupuesto (GC-421), V9 el inicio y el historial (GC-437), V10 la finalización y el cierre (GC-441), V11 la versión de la cotización (GC-427), V12 el tipo de prestador (GC-468) y V13 el índice del historial del cliente (GC-448), ya tomadas |
-| ms-services | luego | Evidencias (GC-439) |
+| ms-services | V17 | V8 es el presupuesto (GC-421), V9 el inicio y el historial (GC-437), V10 la finalización y el cierre (GC-441), V11 la versión de la cotización (GC-427), V12 el tipo de prestador (GC-468), V13 el índice del historial del cliente (GC-448), V14 y V15 las evidencias (GC-439) y V16 el pago retenido por contratación y los eventos procesados (GC-490), ya tomadas |
 | ms-users | V9 en adelante | V8 es la empresa (GC-466), ya tomada; evaluaciones y su Outbox (GC-444) |
 
 **Regla:** el número lo toma quien **fusiona primero**. Antes de fusionar un PR con migración, se actualiza la rama
