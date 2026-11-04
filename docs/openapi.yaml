@@ -148,6 +148,75 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
 
+  /api/services/requests/{id}/compatible-technicians:
+    get:
+      summary: Ver los técnicos compatibles con una de mis solicitudes (GC-474)
+      description: |
+        Prestadores que ofrecen la categoría de la solicitud, atienden su zona y tienen una franja de disponibilidad que
+        incluye su momento esperado, en orden estable y sin ranking. ms-services toma de la solicitud la categoría, la
+        ciudad, las coordenadas aproximadas y el momento esperado, y los consulta a ms-matching-geo por la ruta interna
+        (`POST /internal/matching/technicians`, con la `INTERNAL_API_KEY`), que a su vez los pide a ms-users: aquí no se
+        guarda ningún dato del técnico. Matching aplica además la verificación vigente si ms-users la exige
+        (`fixia.eligibility.require-verified`). A matching nunca viaja la dirección exacta ni nada del cliente.
+
+        Solo mientras la solicitud sigue abierta (publicada y con el momento esperado por delante, la misma regla para
+        postularse y seleccionar); si no, 409 sin consultar a matching. Si la solicitud no existe, es de otro cliente o el
+        identificador no es un UUID, la respuesta es la misma 404.
+
+        **Paginación por cursor.** Una consulta revisa un número acotado de técnicos: una página puede venir corta, o
+        vacía, con `nextCursor` no nulo; hay que seguir pidiendo hasta que sea nulo. El cursor es opaco; uno que matching
+        no emitió da 400. Si matching no responde o responde algo inválido, 503: nunca una lista vacía, que parecería que
+        no hay técnicos. La respuesta no incluye la zona (centro y radio) del técnico, distancia ni datos de contacto.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+        - name: cursor
+          in: query
+          required: false
+          description: El `nextCursor` de la página anterior; sin él se empieza desde el principio.
+          schema: { type: string }
+      responses:
+        '200':
+          description: Una página de técnicos compatibles.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompatibleTechniciansPage'
+        '400':
+          description: Límite fuera de rango o cursor no válido (título "Consulta inválida").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: La solicitud ya no está publicada o su momento esperado ya pasó (título "Solicitud no disponible").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          description: ms-matching-geo no entregó los técnicos (título "Técnicos compatibles no disponibles").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+
   /api/services/requests/{id}/applications/{applicationId}/selection:
     post:
       summary: Seleccionar al prestador de una de mis solicitudes (GC-348)
@@ -706,6 +775,240 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
 
+  /api/services/contracts/{contractId}/evidences:
+    post:
+      summary: Subir una evidencia del servicio, como técnico contratado (GC-439)
+      description: |
+        Solo `ROLE_PROFESSIONAL`, y solo el técnico contratado. Cuerpo `multipart/form-data` con el campo `file`.
+        Formatos: JPEG, PNG, WebP y PDF; el tipo declarado debe coincidir con el contenido real. Máximo **10 MB** por
+        archivo y **10 evidencias** por servicio. Solo se acepta mientras el servicio está en `IN_PROGRESS` o
+        `TECHNICIAN_FINISHED`. Las evidencias son opcionales: no condicionan el cierre.
+
+        La evidencia solo existe cuando el archivo quedó confirmado en el almacenamiento y los metadatos en la base;
+        si algo falla no queda nada (ni evidencia ni evento). Al confirmarse se publica `evidencia.registrada`.
+
+        **Idempotente:** subir otra vez el mismo archivo (mismo SHA-256) al mismo contrato devuelve `200` con la
+        evidencia ya registrada, sin duplicarla ni publicar otro evento. Es seguro reintentar tras un corte de red.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: Evidencia nueva registrada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Evidence'
+        '200':
+          description: El archivo ya estaba registrado en este contrato; se devuelve la evidencia existente.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Evidence'
+        '400':
+          description: |
+            Archivo vacío, ausente, de tipo no permitido, que no coincide con su formato real o de más de 10 MB
+            (título "Evidencia inválida" o "Archivo demasiado grande").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: El contrato no existe o el técnico autenticado no es el contratado.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: |
+            El servicio no está en curso ni finalizado por el técnico (título "Evidencia no permitida"), o ya tiene
+            10 evidencias (título "Límite de evidencias alcanzado").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          $ref: '#/components/responses/StorageUnavailable'
+
+    get:
+      summary: Listar las evidencias del contrato, como técnico contratado (GC-439)
+      description: Solo `ROLE_PROFESSIONAL`, y solo el técnico contratado. Orden cronológico ascendente.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Evidencias registradas (lista vacía si no hay ninguna).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Evidence'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/services/contracts/{contractId}/evidences/{evidenceId}/content:
+    get:
+      summary: Descargar el archivo de una evidencia, como técnico contratado (GC-439)
+      description: |
+        Solo el técnico contratado; el cliente usa `/api/services/requests/{id}/evidences/{evidenceId}/content`.
+        No hay URLs públicas ni firmadas: la descarga exige `Authorization: Bearer <token>`. En Flutter, pida el
+        archivo con ese encabezado (por ejemplo `http.get` y mostrar los bytes con `Image.memory`); `Image.network`
+        sin encabezados no funciona.
+
+        Antes de entregarlo se verifica que el contenido coincide con el SHA-256 registrado.
+        Respuesta con `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` y `Content-Length`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: contractId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: evidenceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Archivo binario con el `Content-Type` con el que se subió.
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+            application/pdf: { schema: { type: string, format: binary } }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: El contrato o la evidencia no existen, o no es el técnico contratado.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          description: El contenido almacenado no coincide con su SHA-256; no se entrega el archivo (título "Integridad de la evidencia").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          $ref: '#/components/responses/StorageUnavailable'
+
+  /api/services/requests/{id}/evidences:
+    get:
+      summary: Listar las evidencias del servicio, como cliente dueño (GC-439)
+      description: Solo `ROLE_CLIENT`, y solo el cliente dueño de la solicitud. Orden cronológico ascendente.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Evidencias registradas (lista vacía si no hay ninguna).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Evidence'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/services/requests/{id}/evidences/{evidenceId}/content:
+    get:
+      summary: Descargar el archivo de una evidencia, como cliente dueño (GC-439)
+      description: |
+        Solo el cliente dueño de la solicitud. Misma entrega y verificación que la descarga del técnico: exige
+        `Authorization: Bearer <token>`, no hay URLs públicas y se verifica el SHA-256 antes de responder.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: evidenceId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Archivo binario con el `Content-Type` con el que se subió.
+          content:
+            image/jpeg: { schema: { type: string, format: binary } }
+            image/png: { schema: { type: string, format: binary } }
+            image/webp: { schema: { type: string, format: binary } }
+            application/pdf: { schema: { type: string, format: binary } }
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: La solicitud o la evidencia no existen, o no es el cliente dueño.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '500':
+          description: El contenido almacenado no coincide con su SHA-256; no se entrega el archivo (título "Integridad de la evidencia").
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          $ref: '#/components/responses/StorageUnavailable'
+
   /api/services/requests/{id}/closure:
     post:
       summary: Confirmar el cierre del servicio, como cliente (GC-441)
@@ -983,6 +1286,20 @@ components:
             status: 404
             detail: No existe la solicitud indicada
 
+    StorageUnavailable:
+      description: |
+        El almacenamiento de archivos no respondió o no pudo confirmar la operación (título "Almacenamiento no
+        disponible"). No se registró nada; reintente más tarde.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+          example:
+            type: about:blank
+            title: Almacenamiento no disponible
+            status: 503
+            detail: El almacenamiento de evidencias no está disponible. Intente de nuevo en unos minutos
+
     ValidationError:
       description: Datos inválidos o faltantes; `errors` indica qué corregir.
       content:
@@ -1227,6 +1544,29 @@ components:
         closedAt: { type: string, format: date-time, nullable: true }
         lastTransitionAt: { type: string, format: date-time, nullable: true, description: El último cambio de estado registrado. }
 
+    CompatibleTechniciansPage:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompatibleTechnician'
+        nextCursor:
+          type: string
+          nullable: true
+          description: Nulo solo cuando no quedan técnicos por revisar. Una página puede venir corta, o vacía, con cursor no nulo.
+
+    CompatibleTechnician:
+      type: object
+      description: Un técnico compatible con la solicitud. Solo lo público; nunca su zona, distancia ni datos de contacto.
+      properties:
+        userId: { type: string, format: uuid }
+        displayName: { type: string, example: Carlos G., description: Nombre e inicial del apellido. }
+        categories:
+          type: array
+          items: { type: string, example: PLUMBING }
+        city: { type: string, example: Bogotá, description: Ciudad de la zona de atención. }
+
     Applicant:
       type: object
       description: Postulante a una solicitud, tal como lo ve el cliente dueño.
@@ -1464,3 +1804,27 @@ components:
                 properties:
                   field: { type: string, example: approximateLocation.city }
                   message: { type: string }
+
+    Evidence:
+      type: object
+      required:
+        - id
+        - serviceRequestId
+        - contractId
+        - uploadedBy
+        - contentType
+        - sizeBytes
+        - sha256
+        - createdAt
+      properties:
+        id: { type: string, format: uuid }
+        serviceRequestId: { type: string, format: uuid }
+        contractId: { type: string, format: uuid }
+        uploadedBy: { type: string, format: uuid }
+        contentType: { type: string, example: image/jpeg }
+        sizeBytes: { type: integer, example: 204850 }
+        sha256:
+          type: string
+          description: SHA-256 hexadecimal del archivo, verificado en cada descarga.
+          example: 85dc025a1768406cd1ef7db06ea7d8b598b9a117b3cb341d3c00486bfa332b73
+        createdAt: { type: string, format: date-time }

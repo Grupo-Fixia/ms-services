@@ -33,7 +33,8 @@
         "servicio.iniciado",
         "servicio.finalizado",
         "servicio.cierre_objetado",
-        "servicio.cerrado"
+        "servicio.cerrado",
+        "evidencia.registrada"
       ]
     },
     "schemaVersion": {

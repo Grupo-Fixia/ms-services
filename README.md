@@ -17,6 +17,8 @@ solicitudes (GC-333) y, en tareas posteriores, postulaciones, selección de pres
 | `JWT_ISSUER` / `JWT_AUDIENCE` | Claims `iss` y `aud` esperados | `https://auth.fixia.com` / `https://api.fixia.com` |
 | `USERS_BASE_URL` | URL interna de ms-users | `http://ms-users:8080` |
 | `INTERNAL_API_KEY` | Clave compartida con ms-users para su ruta interna de revocación (el mismo valor en ambos) | vacía: toda petición autenticada se rechaza |
+| `MATCHING_BASE_URL` | URL interna de ms-matching-geo (técnicos compatibles, GC-474); usa la misma `INTERNAL_API_KEY` | `http://ms-matching-geo:8000` |
+| `MATCHING_CONNECT_TIMEOUT` / `MATCHING_READ_TIMEOUT` | Esperas hacia ms-matching-geo (la lectura es mayor: matching puede hacer hasta 3 consultas a ms-users) | `1s` / `8s` |
 | `USERS_CONNECT_TIMEOUT` / `USERS_READ_TIMEOUT` | Tiempos de espera hacia ms-users | `1s` / `2s` |
 
 Sin `JWT_PUBLIC_KEY` el servicio **no arranca** (salvo en `local` y `test`, que usan una clave efímera). Las claves
@@ -134,6 +136,24 @@ devuelve hasta que la solicitud está contratada (`CONTRACTED`) o en curso (`IN_
   proponga otro técnico u otro precio (la misma unicidad de V4); 503 si ms-users no responde. Las respuestas traen
   `providerType` y `technicianId`. Después de la selección no hay flujo empresarial: la empresa no puede cotizar (403
   por rol) y el técnico propuesto tampoco (409, porque el prestador seleccionado es la empresa).
+
+## Técnicos compatibles con una solicitud (GC-474)
+
+| Método y ruta | Descripción |
+|---|---|
+| `GET /api/services/requests/{id}/compatible-technicians?limit=20&cursor=...` | Técnicos que ofrecen la categoría de una solicitud mía, atienden su zona y tienen una franja de disponibilidad que incluye su momento esperado |
+
+- Solo `ROLE_CLIENT`. Si la solicitud no existe, es de otro cliente o el `id` no es un UUID, la misma 404. Solo mientras la
+  solicitud sigue abierta (publicada y con el momento esperado por delante); si no, 409 sin consultar a matching.
+- ms-services pide los técnicos a ms-matching-geo en `POST /internal/matching/technicians` (con la `INTERNAL_API_KEY`) y
+  solo le envía lo aproximado de la solicitud: categoría, ciudad, coordenadas redondeadas a ~1 km y momento esperado.
+  Nunca la dirección exacta ni datos del cliente. Matching los consulta a ms-users, que aplica además la verificación vigente
+  si la exige (`fixia.eligibility.require-verified`); aquí no se guarda ningún dato del técnico.
+- Cada elemento trae `userId`, `displayName`, `categories` y `city`; nunca la zona (centro y radio), distancia ni contacto.
+- **Paginación por cursor:** una página puede venir corta, o vacía, con `nextCursor` no nulo; hay que seguir pidiendo hasta
+  que sea nulo. `limit` de 1 a 50 (20 por defecto); un `limit` o un `cursor` inválidos dan 400.
+- Si matching no responde o responde algo inválido, 503 "Técnicos compatibles no disponibles": nunca una lista vacía, que
+  parecería que no hay técnicos. No afecta a `/api/services/opportunities` (GC-297) ni al resto del recorrido.
 
 ## Postulantes de una solicitud (GC-347, GC-425)
 
@@ -458,6 +478,34 @@ valor inválido es 400). Quien consulta y su rol salen del token; sin servicios,
 - `nextCursor` es opaco; se pide la siguiente página con él hasta que sea `null`. El orden es estable (`contractedAt` e `id`):
   nada se repite ni se salta si se contratan servicios nuevos entre páginas.
 - **Migración V13:** índice `ix_service_contracts_client` para listar por cliente (el del prestador ya existía desde V5).
+
+## Evidencias (GC-439)
+
+El técnico contratado sube fotos o documentos del trabajo; el archivo vive en el bucket **privado** `evidences` de RustFS
+(S3 compatible) y la base solo guarda los metadatos (`service_evidences`: servicio, contrato, autor, fecha, tipo, tamaño
+y SHA-256). Contrato completo en `docs/openapi.yaml` y `docs/contracts/sprint-5.md` §6.
+
+| Operación | Ruta | Quién |
+|---|---|---|
+| Subir (`multipart`, campo `file`) | `POST /api/services/contracts/{contractId}/evidences` | técnico contratado |
+| Listar | `GET /api/services/contracts/{contractId}/evidences` | técnico contratado |
+| Descargar | `GET /api/services/contracts/{contractId}/evidences/{evidenceId}/content` | técnico contratado |
+| Listar | `GET /api/services/requests/{id}/evidences` | cliente dueño |
+| Descargar | `GET /api/services/requests/{id}/evidences/{evidenceId}/content` | cliente dueño |
+
+- **Límites:** JPEG, PNG, WebP y PDF, 10 MB por archivo y 10 por servicio; el contenido real debe coincidir con el tipo
+  declarado. Se sube con el servicio en curso o finalizado por el técnico; son opcionales para el cierre.
+- **201 / 200:** subir el mismo archivo otra vez al mismo contrato devuelve `200` con la evidencia existente, sin duplicar
+  ni publicar otro `evidencia.registrada`.
+- **Sin referencias a subidas incompletas:** la fila y el evento nacen en la misma transacción que confirma la carga; si algo
+  falla, el objeto se borra. Almacenamiento caído: `503`.
+- **Integridad:** cada descarga verifica el SHA-256 antes de entregar el archivo (`500` si no coincide). No hay URLs
+  públicas: la descarga exige `Authorization: Bearer`.
+- **Configuración:** `RUSTFS_ENDPOINT`, `RUSTFS_BUCKET_EVIDENCES`, `RUSTFS_ACCESS_KEY`, `RUSTFS_SECRET_KEY`,
+  `SPRING_SERVLET_MULTIPART_MAX_FILE_SIZE` (10 MB) y `SPRING_SERVLET_MULTIPART_MAX_REQUEST_SIZE` (11 MB por defecto: el
+  cuerpo multipart suma las cabeceras al archivo; con 10 MB un archivo de exactamente 10 MB se rechaza). Las credenciales
+  por defecto son solo de desarrollo.
+- **Eventos:** `evidencia.registrada` se escribe en el Outbox; queda `PENDING` hasta que el relay (GC-434) lo publique.
 
 ## Eventos de negocio (GC-436)
 

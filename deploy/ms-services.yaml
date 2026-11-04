@@ -37,6 +37,14 @@ spec:
               value: "ms_services"
             - name: USERS_BASE_URL
               value: "http://ms-users:8080"
+            - name: MATCHING_BASE_URL
+              value: "http://ms-matching-geo:8000"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: "kafka-0.kafka.data.svc.cluster.local:9092"
+            - name: RUSTFS_ENDPOINT
+              value: "http://rustfs.data.svc.cluster.local:9000"
+            - name: RUSTFS_BUCKET_EVIDENCES
+              value: "evidences"
           envFrom:
             - secretRef:
                 name: ms-services-secrets

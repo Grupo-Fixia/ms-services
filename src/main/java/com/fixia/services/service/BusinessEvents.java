@@ -38,6 +38,7 @@ public final class BusinessEvents {
     public static final String SERVICE_FINISHED = "servicio.finalizado";
     public static final String CLOSURE_OBJECTED = "servicio.cierre_objetado";
     public static final String SERVICE_CLOSED = "servicio.cerrado";
+    public static final String EVIDENCE_REGISTERED = "evidencia.registrada";
 
     private static final short V1 = 1;
 
@@ -128,6 +129,10 @@ public final class BusinessEvents {
                          ServiceRequestStatus status) {
     }
 
+    record EvidenceRegistered(UUID evidenceId, UUID serviceRequestId, UUID uploadedBy, String contentType,
+                             long sizeBytes, String sha256) {
+    }
+
     /** El cliente publicó la solicitud. Solo ubicación aproximada, el número de fotos y su presupuesto orientativo. */
     public static Event requestPublished(ServiceRequest request) {
         ApproximateLocation location = request.getApproximateLocation();
@@ -209,5 +214,12 @@ public final class BusinessEvents {
     public static Event serviceClosed(ServiceContract contract, Instant closedAt) {
         return new Event(SERVICE_CLOSED, V1, new ServiceClosed(contract.getId(), contract.getServiceRequestId(),
                 contract.getClientId(), contract.getProviderId(), closedAt, ServiceRequestStatus.CLOSED));
+    }
+
+    /** El técnico subió una evidencia al servicio (GC-439). */
+    public static Event evidenceRegistered(UUID evidenceId, UUID serviceRequestId, UUID uploadedBy,
+                                           String contentType, long sizeBytes, String sha256) {
+        return new Event(EVIDENCE_REGISTERED, V1, new EvidenceRegistered(evidenceId, serviceRequestId,
+                uploadedBy, contentType, sizeBytes, sha256));
     }
 }

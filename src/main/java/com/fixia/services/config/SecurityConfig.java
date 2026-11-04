@@ -31,6 +31,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/services/opportunities/**")
                                 .hasAnyAuthority("ROLE_PROFESSIONAL", "ROLE_COMPANY")
                         .requestMatchers("/api/services/quotations/**").hasAuthority("ROLE_PROFESSIONAL")
+                        .requestMatchers("/api/services/contracts/*/evidences/*/content")
+                                .hasAnyAuthority("ROLE_PROFESSIONAL", "ROLE_CLIENT")
                         .requestMatchers("/api/services/contracts/**").hasAuthority("ROLE_PROFESSIONAL")
                         .requestMatchers("/api/services/history/**")
                                 .hasAnyAuthority("ROLE_CLIENT", "ROLE_PROFESSIONAL")

@@ -4,7 +4,18 @@ spring:
     username: sa
     password: ""
     driver-class-name: org.h2.Driver
+  kafka:
+    bootstrap-servers: localhost:9092
 
 fixia:
   users:
     internal-api-key: clave-interna-de-prueba
+  storage:
+    endpoint: http://localhost:9000
+    region: us-east-1
+    bucket-evidences: evidences
+    access-key: test-access-key
+    secret-key: test-secret-key
+  outbox:
+    relay:
+      enabled: false

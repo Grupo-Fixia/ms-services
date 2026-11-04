@@ -66,6 +66,10 @@ public class GlobalExceptionHandler {
         if (ex instanceof MethodArgumentTypeMismatchException mismatch && "contractId".equals(mismatch.getName())) {
             return handleContractNotFound(new ContractNotFoundException());
         }
+        // Y con el id de evidencia (GC-439).
+        if (ex instanceof MethodArgumentTypeMismatchException mismatch && "evidenceId".equals(mismatch.getName())) {
+            return handleEvidenceNotFound(new EvidenceNotFoundException());
+        }
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.NOT_FOUND, "No existe la solicitud indicada");
         problem.setTitle("Solicitud no encontrada");
@@ -117,6 +121,22 @@ public class GlobalExceptionHandler {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
                 "No fue posible consultar el perfil de los postulantes. Intenta de nuevo en unos minutos");
         problem.setTitle("Perfiles no disponibles");
+        return problem;
+    }
+
+    /** Sin respuesta de matching no se sugieren técnicos a medias ni una lista vacía engañosa (GC-474). */
+    @ExceptionHandler(MatchingLookupException.class)
+    public ProblemDetail handleMatchingUnavailable(MatchingLookupException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
+                "No fue posible consultar los técnicos compatibles. Intenta de nuevo en unos minutos");
+        problem.setTitle("Técnicos compatibles no disponibles");
+        return problem;
+    }
+
+    @ExceptionHandler(InvalidMatchingQueryException.class)
+    public ProblemDetail handleInvalidMatchingQuery(InvalidMatchingQueryException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Consulta inválida");
         return problem;
     }
 
@@ -196,6 +216,58 @@ public class GlobalExceptionHandler {
     public ProblemDetail handleContractNotFound(ContractNotFoundException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
         problem.setTitle("Contratación no encontrada");
+        return problem;
+    }
+
+    @ExceptionHandler(InvalidEvidenceException.class)
+    public ProblemDetail handleInvalidEvidence(InvalidEvidenceException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, ex.getMessage());
+        problem.setTitle("Evidencia inválida");
+        return problem;
+    }
+
+    @ExceptionHandler(EvidenceLimitExceededException.class)
+    public ProblemDetail handleEvidenceLimitExceeded(EvidenceLimitExceededException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Límite de evidencias alcanzado");
+        return problem;
+    }
+
+    @ExceptionHandler(EvidenceNotAllowedException.class)
+    public ProblemDetail handleEvidenceNotAllowed(EvidenceNotAllowedException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Evidencia no permitida");
+        return problem;
+    }
+
+    @ExceptionHandler(EvidenceNotFoundException.class)
+    public ProblemDetail handleEvidenceNotFound(EvidenceNotFoundException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, ex.getMessage());
+        problem.setTitle("Evidencia no encontrada");
+        return problem;
+    }
+
+    @ExceptionHandler(StorageUnavailableException.class)
+    public ProblemDetail handleStorageUnavailable(StorageUnavailableException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.SERVICE_UNAVAILABLE,
+                "El almacenamiento de evidencias no está disponible. Intente de nuevo en unos minutos");
+        problem.setTitle("Almacenamiento no disponible");
+        return problem;
+    }
+
+    @ExceptionHandler(EvidenceIntegrityException.class)
+    public ProblemDetail handleEvidenceIntegrity(EvidenceIntegrityException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR,
+                "No fue posible verificar la integridad de la evidencia");
+        problem.setTitle("Integridad de la evidencia");
+        return problem;
+    }
+
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    public ProblemDetail handleMaxUploadSize(org.springframework.web.multipart.MaxUploadSizeExceededException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST,
+                "El archivo excede el tamaño máximo permitido de 10 MB");
+        problem.setTitle("Archivo demasiado grande");
         return problem;
     }
 }
