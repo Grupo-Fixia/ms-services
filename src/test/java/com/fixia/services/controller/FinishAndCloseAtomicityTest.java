@@ -23,6 +23,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.SpyBean;
@@ -61,6 +62,9 @@ class FinishAndCloseAtomicityTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private ServiceRequestRepository serviceRequestRepository;
@@ -129,6 +133,7 @@ class FinishAndCloseAtomicityTest {
         mockMvc.perform(post("/api/services/requests/" + saved.getId() + "/quotations/" + quotation.getId()
                 + "/acceptance").with(client())).andExpect(status().isOk());
         ServiceContract contract = contractRepository.findByServiceRequestId(saved.getId()).orElseThrow();
+        ContractPayments.hold(jdbcTemplate, contract.getId());
         mockMvc.perform(post("/api/services/contracts/" + contract.getId() + "/start").with(provider()))
                 .andExpect(status().isOk());
         return contract;

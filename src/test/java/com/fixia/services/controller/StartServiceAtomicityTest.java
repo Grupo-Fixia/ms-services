@@ -21,6 +21,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.SpyBean;
@@ -57,6 +58,9 @@ class StartServiceAtomicityTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private ServiceRequestRepository serviceRequestRepository;
@@ -119,6 +123,7 @@ class StartServiceAtomicityTest {
     }
 
     private void tryToStart(ServiceContract contract, String expectedFailure) {
+        ContractPayments.hold(jdbcTemplate, contract.getId());
         assertThatThrownBy(() -> mockMvc.perform(post("/api/services/contracts/" + contract.getId() + "/start")
                 .with(jwt().jwt(token -> token.subject("usr_" + PROVIDER))
                         .authorities(new SimpleGrantedAuthority("ROLE_PROFESSIONAL")))))

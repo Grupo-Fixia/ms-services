@@ -35,14 +35,14 @@ public class ContractController {
     @GetMapping
     public List<ContractResponse> list(@AuthenticationPrincipal Jwt jwt) {
         return service.listMine(providerId(jwt)).stream()
-                .map(view -> ContractResponse.from(view.contract(), view.request(), view.timeline()))
+                .map(view -> ContractResponse.from(view.contract(), view.request(), view.timeline(), view.paymentStatus()))
                 .toList();
     }
 
     @GetMapping("/{contractId}")
     public ContractResponse get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID contractId) {
         ContractService.ContractView view = service.getMine(providerId(jwt), contractId);
-        return ContractResponse.from(view.contract(), view.request(), view.timeline());
+        return ContractResponse.from(view.contract(), view.request(), view.timeline(), view.paymentStatus());
     }
 
     /**
@@ -53,7 +53,7 @@ public class ContractController {
     @PostMapping("/{contractId}/start")
     public ContractResponse start(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID contractId) {
         ContractService.ContractView view = service.start(providerId(jwt), contractId);
-        return ContractResponse.from(view.contract(), view.request(), view.timeline());
+        return ContractResponse.from(view.contract(), view.request(), view.timeline(), view.paymentStatus());
     }
 
     /**
@@ -64,7 +64,7 @@ public class ContractController {
     @PostMapping("/{contractId}/finish")
     public ContractResponse finish(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID contractId) {
         ContractService.ContractView view = service.finish(providerId(jwt), contractId);
-        return ContractResponse.from(view.contract(), view.request(), view.timeline());
+        return ContractResponse.from(view.contract(), view.request(), view.timeline(), view.paymentStatus());
     }
 
     /**

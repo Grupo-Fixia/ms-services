@@ -23,6 +23,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -67,6 +68,9 @@ class EvidenceControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -139,6 +143,7 @@ class EvidenceControllerTest {
                 + "/acceptance").with(client(CLIENT))).andExpect(status().isOk());
 
         ServiceContract contract = contractRepository.findByServiceRequestId(saved.getId()).orElseThrow();
+        ContractPayments.hold(jdbcTemplate, contract.getId());
         mockMvc.perform(post("/api/services/contracts/" + contract.getId() + "/start").with(professional(PROVIDER)))
                 .andExpect(status().isOk());
         return new Service(saved, contract);
