@@ -1,6 +1,7 @@
 package com.fixia.services.repository;
 
 import com.fixia.services.domain.ServiceContract;
+import com.fixia.services.domain.ServiceRequestStatus;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Slice;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -8,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -20,6 +22,32 @@ public interface ServiceContractRepository extends JpaRepository<ServiceContract
 
     /** Contrataciones del prestador, la más reciente primero. */
     List<ServiceContract> findByProviderIdOrderByContractedAtDescIdDesc(UUID providerId);
+
+    /**
+     * Contrataciones del prestador cuya solicitud sigue en alguno de {@code statuses} y cuya fecha acordada cae
+     * estrictamente entre {@code from} y {@code to}, sin contar la solicitud {@code excludedRequestId}. La usa
+     * {@code ProviderScheduleGuard} para no contratar dos servicios del mismo prestador a la misma hora.
+     */
+    @Query("""
+            select c from ServiceContract c, ServiceRequest r
+            where r.id = c.serviceRequestId
+              and c.providerId = :providerId
+              and r.status in :statuses
+              and c.agreedAt > :from and c.agreedAt < :to
+              and c.serviceRequestId <> :excludedRequestId
+            order by c.agreedAt asc
+            """)
+    List<ServiceContract> findBusyOverlaps(@Param("providerId") UUID providerId,
+                                           @Param("statuses") Collection<ServiceRequestStatus> statuses,
+                                           @Param("from") Instant from, @Param("to") Instant to,
+                                           @Param("excludedRequestId") UUID excludedRequestId, Pageable pageable);
+
+    /** El primer choque de {@link #findBusyOverlaps}, si lo hay. */
+    default Optional<ServiceContract> findFirstBusyOverlap(UUID providerId, Collection<ServiceRequestStatus> statuses,
+                                                           Instant from, Instant to, UUID excludedRequestId) {
+        return findBusyOverlaps(providerId, statuses, from, to, excludedRequestId, Pageable.ofSize(1))
+                .stream().findFirst();
+    }
 
     /** Una contratación del prestador; si es de otro, no se encuentra. */
     Optional<ServiceContract> findByIdAndProviderId(UUID id, UUID providerId);

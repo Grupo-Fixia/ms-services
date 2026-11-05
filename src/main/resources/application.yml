@@ -79,6 +79,10 @@ fixia:
       topic: ${FIXIA_PAYMENTS_TOPIC:fixia.payments.events}
       group-id: ${FIXIA_PAYMENTS_CONSUMER_GROUP:ms-services}
       retry-delay-ms: ${FIXIA_PAYMENTS_CONSUMER_RETRY_DELAY_MS:5000}
+  scheduling:
+    # Margen mínimo entre las fechas acordadas de dos servicios activos del mismo técnico. Un servicio no guarda su
+    # duración: con 2 horas, un servicio a las 10:00 bloquea de 08:01 a 11:59.
+    min-gap: ${FIXIA_SCHEDULING_MIN_GAP:PT2H}
   outbox:
     relay:
       enabled: ${FIXIA_OUTBOX_RELAY_ENABLED:true}
