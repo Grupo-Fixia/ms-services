@@ -50,6 +50,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 class HistoryFlowTest {
 
+    /**
+     * Fecha acordada distinta para cada contrato de la prueba (3 horas después de la anterior): un mismo prestador no
+     * puede quedar contratado dos veces a la misma hora ({@code ProviderScheduleGuard}).
+     */
+    private static final java.util.concurrent.atomic.AtomicInteger SLOT = new java.util.concurrent.atomic.AtomicInteger();
+
+    private static Instant nextFreeSlot(Instant now) {
+        return now.plus(Duration.ofDays(3)).plus(Duration.ofHours(3L * SLOT.incrementAndGet()));
+    }
+
     private static final UUID CLIENT = UUID.randomUUID();
     private static final UUID OTHER_CLIENT = UUID.randomUUID();
     private static final UUID PROVIDER = UUID.randomUUID();
@@ -152,7 +162,7 @@ class HistoryFlowTest {
         quotation.put("currency", "COP");
         quotation.put("scope", "Cambio de la tubería del lavamanos");
         quotation.put("conditions", "Materiales incluidos");
-        quotation.put("agreedAt", now.plus(Duration.ofDays(3)).toString());
+        quotation.put("agreedAt", nextFreeSlot(now).toString());
         quotation.put("validUntil", now.plus(Duration.ofDays(1)).toString());
         UUID quotationId = UUID.fromString(json(send("/api/services/quotations", providerId, "ROLE_PROFESSIONAL",
                 quotation).andExpect(status().isCreated())).get("id").asText());

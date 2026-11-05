@@ -63,6 +63,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 class EvidenceRulesTest {
 
+    /**
+     * Fecha acordada distinta para cada contrato de la prueba (3 horas después de la anterior): un mismo prestador no
+     * puede quedar contratado dos veces a la misma hora ({@code ProviderScheduleGuard}).
+     */
+    private static final java.util.concurrent.atomic.AtomicInteger SLOT = new java.util.concurrent.atomic.AtomicInteger();
+
+    private static Instant nextFreeSlot(Instant now) {
+        return now.plus(Duration.ofDays(3)).plus(Duration.ofHours(3L * SLOT.incrementAndGet()));
+    }
+
     private static final UUID CLIENT = UUID.randomUUID();
     private static final UUID OTHER_CLIENT = UUID.randomUUID();
     private static final UUID PROVIDER = UUID.randomUUID();
@@ -136,7 +146,7 @@ class EvidenceRulesTest {
         ServiceRequest saved = serviceRequestRepository.saveAndFlush(request);
         Quotation quotation = quotationRepository.saveAndFlush(Quotation.send(saved, PROVIDER,
                 new BigDecimal("150000.50"), CurrencyCode.COP, "Cambio de tubería", "Incluye materiales",
-                now.plus(Duration.ofDays(3)), now.plus(Duration.ofDays(1)), 1, now));
+                nextFreeSlot(now), now.plus(Duration.ofDays(1)), 1, now));
         mockMvc.perform(post("/api/services/requests/" + saved.getId() + "/quotations/" + quotation.getId()
                 + "/acceptance").with(client(CLIENT))).andExpect(status().isOk());
         ServiceContract contract = contractRepository.findByServiceRequestId(saved.getId()).orElseThrow();
