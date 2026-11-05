@@ -29,6 +29,7 @@ import java.util.UUID;
 public final class BusinessEvents {
 
     public static final String REQUEST_PUBLISHED = "solicitud.publicada";
+    public static final String REQUEST_CANCELLED = "solicitud.cancelada";
     public static final String APPLICATION_REGISTERED = "postulacion.registrada";
     public static final String PROVIDER_SELECTED = "prestador.seleccionado";
     public static final String QUOTATION_SENT = "cotizacion.enviada";
@@ -89,6 +90,11 @@ public final class BusinessEvents {
                                  UUID technicianId) {
     }
 
+    record RequestCancelled(UUID serviceRequestId, UUID clientId, ServiceRequestStatus previousStatus,
+                            UUID selectedProviderId, List<UUID> rejectedApplicationIds, Instant cancelledAt,
+                            ServiceRequestStatus status) {
+    }
+
     record ProviderSelected(UUID serviceRequestId, UUID clientId, UUID selectedApplicationId, UUID selectedProviderId,
                             Money selectedProposedPrice, List<UUID> rejectedApplicationIds, Instant selectedAt,
                             ServiceRequestStatus status, ProviderType selectedProviderType,
@@ -141,6 +147,17 @@ public final class BusinessEvents {
                 new Location(location.city(), location.zone(), location.latitude(), location.longitude()),
                 request.getExpectedAt(), request.getPublishedAt(), request.getStatus(),
                 request.getPhotoKeys().size(), Money.of(request.getBudgetAmount(), request.getBudgetCurrency())));
+    }
+
+    /**
+     * El cliente canceló su solicitud antes de contratar (GC-515); {@code rejected} son las postulaciones pendientes
+     * que quedaron rechazadas en la misma transacción.
+     */
+    public static Event requestCancelled(ServiceRequest request, ServiceRequestStatus previousStatus,
+                                         List<ServiceRequestApplication> rejected, Instant cancelledAt) {
+        return new Event(REQUEST_CANCELLED, V1, new RequestCancelled(request.getId(), request.getClientId(),
+                previousStatus, request.getSelectedProviderId(),
+                rejected.stream().map(ServiceRequestApplication::getId).toList(), cancelledAt, request.getStatus()));
     }
 
     /** Un técnico se postuló con su precio propuesto. */

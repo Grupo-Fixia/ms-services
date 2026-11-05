@@ -25,6 +25,7 @@
       "type": "string",
       "enum": [
         "solicitud.publicada",
+        "solicitud.cancelada",
         "postulacion.registrada",
         "prestador.seleccionado",
         "cotizacion.enviada",
