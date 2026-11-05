@@ -41,7 +41,7 @@ public class ServiceRequestClosureController {
     @PostMapping("/closure")
     public ContractResponse confirm(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
         ContractService.ContractView view = service.confirmClosure(clientId(jwt), id);
-        return ContractResponse.from(view.contract(), view.request(), view.timeline());
+        return ContractResponse.from(view.contract(), view.request(), view.timeline(), view.paymentStatus());
     }
 
     /**
@@ -52,7 +52,7 @@ public class ServiceRequestClosureController {
     public ContractResponse object(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
                                    @Valid @RequestBody ClosureObjectionRequest request) {
         ContractService.ContractView view = service.objectClosure(clientId(jwt), id, request.reason());
-        return ContractResponse.from(view.contract(), view.request(), view.timeline());
+        return ContractResponse.from(view.contract(), view.request(), view.timeline(), view.paymentStatus());
     }
 
     /**

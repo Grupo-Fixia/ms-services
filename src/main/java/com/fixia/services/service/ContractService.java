@@ -1,13 +1,17 @@
 package com.fixia.services.service;
 
 import com.fixia.services.domain.ActorRole;
+import com.fixia.services.domain.ContractPayment;
+import com.fixia.services.domain.ContractPaymentStatus;
 import com.fixia.services.domain.Quotation;
 import com.fixia.services.domain.ServiceContract;
 import com.fixia.services.domain.ServiceRequest;
 import com.fixia.services.domain.ServiceRequestStatus;
 import com.fixia.services.domain.ServiceRequestTransition;
 import com.fixia.services.exception.ContractNotFoundException;
+import com.fixia.services.exception.PaymentNotRetainedException;
 import com.fixia.services.exception.ServiceRequestNotFoundException;
+import com.fixia.services.repository.ContractPaymentRepository;
 import com.fixia.services.repository.ServiceContractRepository;
 import com.fixia.services.repository.ServiceRequestRepository;
 import org.springframework.stereotype.Service;
@@ -31,15 +35,18 @@ import java.util.stream.Collectors;
 public class ContractService {
 
     private final ServiceContractRepository contractRepository;
+    private final ContractPaymentRepository paymentRepository;
     private final ServiceRequestRepository serviceRequestRepository;
     private final ServiceRequestHistory history;
     private final BusinessEventRecorder events;
     private final Clock clock;
 
     public ContractService(ServiceContractRepository contractRepository,
+                           ContractPaymentRepository paymentRepository,
                            ServiceRequestRepository serviceRequestRepository, ServiceRequestHistory history,
                            BusinessEventRecorder events, Clock clock) {
         this.contractRepository = contractRepository;
+        this.paymentRepository = paymentRepository;
         this.serviceRequestRepository = serviceRequestRepository;
         this.history = history;
         this.events = events;
@@ -66,6 +73,9 @@ public class ContractService {
      *       publicar otro evento, para que reintentar tras perder la respuesta no parezca un fallo. Dos inicios
      *       simultáneos se aplican uno tras otro por el bloqueo: el segundo ve el servicio en curso.
      *   <li>Desde cualquier otro estado distinto de {@code CONTRACTED} no se puede iniciar (409).
+     *   <li>Solo se inicia con el saldo retenido confirmado por ms-payments (GC-490): sin pago retenido, o con el
+     *       pago fallido, es 409 y no cambia nada (ni estado, ni historial, ni Outbox). Un evento que no llegó, o que
+     *       llegó inconsistente, no autoriza: solo cuenta lo que quedó guardado como retenido.
      * </ol>
      */
     @Transactional
@@ -76,13 +86,17 @@ public class ContractService {
                 .orElseThrow(ContractNotFoundException::new);
         if (request.getStatus() != ServiceRequestStatus.IN_PROGRESS) {
             Instant now = clock.instant();
+            if (request.getStatus() == ServiceRequestStatus.CONTRACTED) {
+                requireRetainedPayment(contract);
+            }
+            // Desde un estado que no es CONTRACTED, la máquina de estados da el 409 de siempre.
             request.start(now);
             history.record(request.getId(), ServiceRequestStatus.CONTRACTED, ServiceRequestStatus.IN_PROGRESS,
                     providerId, ActorRole.PROFESSIONAL, null, now);
             events.record(BusinessEvents.serviceStarted(contract, now), request.getId(),
                     BusinessEvents.Actor.professional(providerId), now);
         }
-        return new ContractView(contract, request, history.timeline(request.getId()));
+        return view(contract, request, history.timeline(request.getId()));
     }
 
     /**
@@ -106,7 +120,7 @@ public class ContractService {
             events.record(BusinessEvents.serviceFinished(contract, now), request.getId(),
                     BusinessEvents.Actor.professional(providerId), now);
         }
-        return new ContractView(contract, request, history.timeline(request.getId()));
+        return view(contract, request, history.timeline(request.getId()));
     }
 
     /**
@@ -129,7 +143,7 @@ public class ContractService {
             events.record(BusinessEvents.serviceClosed(contract, now), request.getId(),
                     BusinessEvents.Actor.client(clientId), now);
         }
-        return new ContractView(contractOf(request), request, history.timeline(request.getId()));
+        return view(contractOf(request), request, history.timeline(request.getId()));
     }
 
     /**
@@ -155,7 +169,7 @@ public class ContractService {
             events.record(BusinessEvents.closureObjected(contract, now), request.getId(),
                     BusinessEvents.Actor.client(clientId), now);
         }
-        return new ContractView(contractOf(request), request, history.timeline(request.getId()));
+        return view(contractOf(request), request, history.timeline(request.getId()));
     }
 
     /** El servicio sigue en ejecución y su último cambio es justamente esta objeción del mismo cliente. */
@@ -184,7 +198,7 @@ public class ContractService {
                 .orElseThrow(ServiceRequestNotFoundException::new);
         ServiceContract contract = contractRepository.findByServiceRequestId(request.getId())
                 .orElseThrow(ContractNotFoundException::new);
-        return new ContractView(contract, request, history.timeline(request.getId()));
+        return view(contract, request, history.timeline(request.getId()));
     }
 
     /** Contrataciones del prestador, la más reciente primero. Sin historial: este se pide al consultar una contratación. */
@@ -194,8 +208,12 @@ public class ContractService {
         Map<UUID, ServiceRequest> requests = serviceRequestRepository
                 .findAllById(contracts.stream().map(ServiceContract::getServiceRequestId).toList()).stream()
                 .collect(Collectors.toMap(ServiceRequest::getId, Function.identity()));
+        Map<UUID, ContractPaymentStatus> payments = paymentRepository
+                .findAllById(contracts.stream().map(ServiceContract::getId).toList()).stream()
+                .collect(Collectors.toMap(ContractPayment::getContractId, ContractPayment::getStatus));
         return contracts.stream()
-                .map(contract -> new ContractView(contract, requests.get(contract.getServiceRequestId()), null))
+                .map(contract -> new ContractView(contract, requests.get(contract.getServiceRequestId()), null,
+                        payments.getOrDefault(contract.getId(), ContractPaymentStatus.PENDING)))
                 .toList();
     }
 
@@ -206,14 +224,36 @@ public class ContractService {
                 .orElseThrow(ContractNotFoundException::new);
         ServiceRequest request = serviceRequestRepository.findById(contract.getServiceRequestId())
                 .orElseThrow(ContractNotFoundException::new);
-        return new ContractView(contract, request, history.timeline(request.getId()));
+        return view(contract, request, history.timeline(request.getId()));
     }
 
     /**
-     * La contratación con su solicitud y el historial de la solicitud, cargados dentro de la transacción para armar la
-     * respuesta fuera de ella. {@code timeline} es nulo en el listado, que no lo incluye.
+     * Pago del servicio (GC-490): solo el estado que ms-payments confirmó, nunca importes ni datos de la billetera. Sin
+     * confirmación es {@code PENDING}.
+     */
+    private ContractPaymentStatus paymentStatusOf(ServiceContract contract) {
+        return paymentRepository.findById(contract.getId()).map(ContractPayment::getStatus)
+                .orElse(ContractPaymentStatus.PENDING);
+    }
+
+    /** Solo un pago retenido autoriza el inicio del servicio (GC-490); pendiente o fallido, 409. */
+    private void requireRetainedPayment(ServiceContract contract) {
+        ContractPaymentStatus status = paymentStatusOf(contract);
+        if (status != ContractPaymentStatus.HELD) {
+            throw new PaymentNotRetainedException(status);
+        }
+    }
+
+    private ContractView view(ServiceContract contract, ServiceRequest request,
+                              List<ServiceRequestTransition> timeline) {
+        return new ContractView(contract, request, timeline, paymentStatusOf(contract));
+    }
+
+    /**
+     * La contratación con su solicitud, el historial de la solicitud y el estado de su pago, cargados dentro de la
+     * transacción para armar la respuesta fuera de ella. {@code timeline} es nulo en el listado, que no lo incluye.
      */
     public record ContractView(ServiceContract contract, ServiceRequest request,
-                               List<ServiceRequestTransition> timeline) {
+                               List<ServiceRequestTransition> timeline, ContractPaymentStatus paymentStatus) {
     }
 }

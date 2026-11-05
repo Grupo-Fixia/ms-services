@@ -90,6 +90,14 @@ public class GlobalExceptionHandler {
         return problem;
     }
 
+    /** El servicio no inicia sin el saldo retenido confirmado por ms-payments (GC-490). */
+    @ExceptionHandler(PaymentNotRetainedException.class)
+    public ProblemDetail handlePaymentNotRetained(PaymentNotRetainedException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Pago no retenido");
+        return problem;
+    }
+
     @ExceptionHandler(ServiceRequestNotAvailableException.class)
     public ProblemDetail handleRequestNotAvailable(ServiceRequestNotAvailableException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());

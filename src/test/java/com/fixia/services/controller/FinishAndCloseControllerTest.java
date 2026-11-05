@@ -22,6 +22,7 @@ import com.fixia.services.service.EventContract;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
@@ -74,6 +75,9 @@ class FinishAndCloseControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -136,6 +140,7 @@ class FinishAndCloseControllerTest {
 
     private Service inProgress() throws Exception {
         Service service = contracted();
+        ContractPayments.hold(jdbcTemplate, service.contractId());
         mockMvc.perform(post("/api/services/contracts/" + service.contractId() + "/start").with(professional(PROVIDER)))
                 .andExpect(status().isOk());
         return service;
@@ -474,6 +479,40 @@ class FinishAndCloseControllerTest {
         objection(CLIENT, inProgress.requestId(), REASON).andExpect(status().isConflict());
         assertThat(statusOf(inProgress.requestId())).isEqualTo(ServiceRequestStatus.IN_PROGRESS);
         assertThat(events(inProgress.requestId(), "servicio.cierre_objetado")).isEmpty();
+    }
+
+    @Test
+    void objetarUnServicioContratadoSinPagoEsConflictoYNoEsUnInicioEncubierto() throws Exception {
+        // Regresión GC-490: CONTRACTED -> IN_PROGRESS es válida en la máquina de estados, pero solo como inicio.
+        Service contracted = contracted();
+        int events = events(contracted.requestId()).size();
+        int transitions = timeline(contracted.requestId()).size();
+
+        objection(CLIENT, contracted.requestId(), REASON).andExpect(status().isConflict());
+
+        assertThat(statusOf(contracted.requestId())).isEqualTo(ServiceRequestStatus.CONTRACTED);
+        assertThat(events(contracted.requestId(), "servicio.cierre_objetado")).isEmpty();
+        assertThat(events(contracted.requestId())).hasSize(events);
+        assertThat(timeline(contracted.requestId())).hasSize(transitions);
+        // La compuerta del pago sigue en pie: sin saldo retenido el inicio sigue siendo 409.
+        start(PROVIDER, contracted.contractId())
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.title").value("Pago no retenido"));
+        assertThat(statusOf(contracted.requestId())).isEqualTo(ServiceRequestStatus.CONTRACTED);
+    }
+
+    @Test
+    void iniciarUnServicioYaFinalizadoEsConflictoYNoLoVuelveAEnCurso() throws Exception {
+        Service finished = finished();
+        int events = events(finished.requestId()).size();
+        int transitions = timeline(finished.requestId()).size();
+
+        start(PROVIDER, finished.contractId()).andExpect(status().isConflict());
+
+        assertThat(statusOf(finished.requestId())).isEqualTo(ServiceRequestStatus.TECHNICIAN_FINISHED);
+        assertThat(events(finished.requestId(), "servicio.iniciado")).hasSize(1);
+        assertThat(events(finished.requestId())).hasSize(events);
+        assertThat(timeline(finished.requestId())).hasSize(transitions);
     }
 
     // ---------- Un servicio cerrado no se reabre ----------

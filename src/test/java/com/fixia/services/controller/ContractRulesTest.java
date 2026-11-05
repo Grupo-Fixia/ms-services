@@ -16,6 +16,7 @@ import com.fixia.services.repository.ServiceRequestTransitionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -63,6 +64,9 @@ class ContractRulesTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -198,6 +202,7 @@ class ContractRulesTest {
     }
 
     private void start(Contracted service) throws Exception {
+        ContractPayments.hold(jdbcTemplate, service.contract());
         send("/api/services/contracts/" + service.contract() + "/start", PROVIDER, "ROLE_PROFESSIONAL", null)
                 .andExpect(status().isOk());
     }
@@ -431,8 +436,10 @@ class ContractRulesTest {
         assertThat(Instant.parse(request.get("expectedAt").asText())).isNotNull();
         // contratado: la dirección exacta llega al cliente y al prestador (ADR-009)
         assertThat(request.at("/exactLocation/address").asText()).isEqualTo(ADDRESS);
-        // el pago ocurre fuera de Fixia y no hay datos de contacto
-        assertThat(contract.toString()).doesNotContain("phone", "email", "payment", "pago", "password");
+        // del pago solo viaja el estado que confirmó ms-payments (GC-490): sin importes, billetera ni contacto
+        assertThat(contract.get("paymentStatus").asText()).isEqualTo("PENDING");
+        assertThat(contract.toString()).doesNotContain("phone", "email", "password", "paymentId", "wallet",
+                "balance", "commission");
     }
 
     @Test

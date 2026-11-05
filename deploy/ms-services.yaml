@@ -45,6 +45,8 @@ spec:
               value: "http://rustfs.data.svc.cluster.local:9000"
             - name: RUSTFS_BUCKET_EVIDENCES
               value: "evidences"
+            - name: LOGGING_LEVEL_ORG_SPRINGFRAMEWORK_WEB_SERVLET_DISPATCHERSERVLET
+              value: "DEBUG"
           envFrom:
             - secretRef:
                 name: ms-services-secrets

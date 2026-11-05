@@ -12,6 +12,9 @@ import com.fixia.services.domain.ServiceContract;
 import com.fixia.services.domain.ServiceRequest;
 import com.fixia.services.domain.ServiceRequestStatus;
 import com.fixia.services.domain.ServiceRequestTransition;
+import com.fixia.services.consumer.PaymentEvent;
+import com.fixia.services.consumer.PaymentEventFixtures;
+import com.fixia.services.consumer.PaymentEventHandler;
 import com.fixia.services.repository.OutboxEventRepository;
 import com.fixia.services.repository.QuotationRepository;
 import com.fixia.services.repository.ServiceContractRepository;
@@ -94,6 +97,9 @@ class StartServiceControllerTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private PaymentEventHandler paymentEvents;
+
     @BeforeEach
     void cleanDatabase() {
         outboxRepository.deleteAllInBatch();
@@ -115,8 +121,18 @@ class StartServiceControllerTest {
         }
     }
 
-    /** Servicio contratado de verdad: el cliente acepta la cotización por la API y nace la contratación. */
+    /**
+     * Servicio contratado con el saldo ya retenido por ms-payments (GC-490): el prestador puede iniciarlo. Las pruebas del
+     * bloqueo del inicio usan {@link #contractedWithoutPayment()}.
+     */
     private Contracted contracted() throws Exception {
+        Contracted contracted = contractedWithoutPayment();
+        ContractPayments.hold(jdbcTemplate, contracted.contractId());
+        return contracted;
+    }
+
+    /** Servicio contratado de verdad: el cliente acepta la cotización por la API y nace la contratación. */
+    private Contracted contractedWithoutPayment() throws Exception {
         Instant now = Instant.now();
         ServiceRequest request = ServiceRequest.publish(CLIENT, ServiceCategory.PLUMBING, "Fuga de agua en el baño",
                 new ApproximateLocation("Bogotá", "Chapinero", 4.6512, -74.0583),
@@ -321,6 +337,132 @@ class StartServiceControllerTest {
         assertThat(statusOf(contracted.requestId())).isEqualTo(ServiceRequestStatus.EXPIRED);
         assertThat(timeline(contracted.requestId())).hasSize(1);
         assertThat(startedEvents(contracted.requestId())).isEmpty();
+    }
+
+    // ---------- Pago retenido (GC-490) ----------
+
+    /** Lo que hace el consumidor al leer el evento de ms-payments, sin pasar por el broker. */
+    private void paymentEvent(Contracted contracted, com.fasterxml.jackson.databind.node.ObjectNode event) {
+        paymentEvents.handle(PaymentEvent.parse(objectMapper, event.toString()));
+    }
+
+    private void assertNothingStarted(Contracted contracted) {
+        assertThat(statusOf(contracted.requestId())).isEqualTo(ServiceRequestStatus.CONTRACTED);
+        assertThat(timeline(contracted.requestId())).hasSize(1);
+        assertThat(startedEvents(contracted.requestId())).isEmpty();
+    }
+
+    @Test
+    void sinPagoConfirmadoElInicioEsConflictoConMensajeClaroYNoCambiaNada() throws Exception {
+        Contracted contracted = contractedWithoutPayment();
+
+        start(PROVIDER, contracted.contractId())
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.title").value("Pago no retenido"))
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("aún no está retenido")));
+
+        assertNothingStarted(contracted);
+        assertThat(outboxRepository.count()).isEqualTo(1);
+    }
+
+    @Test
+    void conElPagoFallidoElInicioEsConflictoQueExplicaQueFaltoSaldo() throws Exception {
+        Contracted contracted = contractedWithoutPayment();
+        paymentEvent(contracted, PaymentEventFixtures.failed(contracted.contract(), 2));
+
+        start(PROVIDER, contracted.contractId())
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.title").value("Pago no retenido"))
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.containsString("saldo insuficiente")))
+                .andExpect(jsonPath("$.detail").value(org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString("120750"))));
+
+        assertNothingStarted(contracted);
+    }
+
+    @Test
+    void cuandoElClienteRecargaYElPagoSeRetieneElPrestadorYaPuedeIniciar() throws Exception {
+        Contracted contracted = contractedWithoutPayment();
+        start(PROVIDER, contracted.contractId()).andExpect(status().isConflict());
+        paymentEvent(contracted, PaymentEventFixtures.failed(contracted.contract(), 2));
+        start(PROVIDER, contracted.contractId()).andExpect(status().isConflict());
+
+        paymentEvent(contracted, PaymentEventFixtures.processed(contracted.contract(), 3));
+
+        start(PROVIDER, contracted.contractId())
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.serviceStatus").value("IN_PROGRESS"))
+                .andExpect(jsonPath("$.paymentStatus").value("HELD"));
+        assertThat(startedEvents(contracted.requestId())).hasSize(1);
+    }
+
+    @Test
+    void unEventoTardioONoConfirmadoNoAutorizaElInicio() throws Exception {
+        Contracted contracted = contractedWithoutPayment();
+        paymentEvent(contracted, PaymentEventFixtures.completed(contracted.contract(), 4));
+        com.fasterxml.jackson.databind.node.ObjectNode inconsistent =
+                PaymentEventFixtures.processed(contracted.contract(), 2);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) inconsistent.get("data"))
+                .put("clientId", UUID.randomUUID().toString());
+        paymentEvent(contracted, inconsistent);
+
+        start(PROVIDER, contracted.contractId()).andExpect(status().isConflict());
+
+        assertNothingStarted(contracted);
+    }
+
+    @Test
+    void reintentarElInicioConElPagoRetenidoSigueSiendo200SinDuplicarNada() throws Exception {
+        Contracted contracted = contractedWithoutPayment();
+        paymentEvent(contracted, PaymentEventFixtures.processed(contracted.contract(), 2));
+
+        start(PROVIDER, contracted.contractId()).andExpect(status().isOk());
+        // Un fallido atrasado, ya con el servicio en curso, no lo tumba ni cambia la respuesta.
+        paymentEvent(contracted, PaymentEventFixtures.failed(contracted.contract(), 1));
+        start(PROVIDER, contracted.contractId()).andExpect(status().isOk())
+                .andExpect(jsonPath("$.serviceStatus").value("IN_PROGRESS"));
+
+        assertThat(timeline(contracted.requestId())).hasSize(2);
+        assertThat(startedEvents(contracted.requestId())).hasSize(1);
+    }
+
+    @Test
+    void elPrestadorAjenoSigueViendoLaMisma404AunSinPagoRetenido() throws Exception {
+        Contracted contracted = contractedWithoutPayment();
+
+        start(OTHER_PROVIDER, contracted.contractId())
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.title").value("Contratación no encontrada"));
+    }
+
+    @Test
+    void laContratacionExponeElEstadoDelPagoAlPrestadorAlClienteYEnElListado() throws Exception {
+        Contracted contracted = contractedWithoutPayment();
+
+        for (String expected : List.of("PENDING", "FAILED", "HELD")) {
+            if (expected.equals("FAILED")) {
+                paymentEvent(contracted, PaymentEventFixtures.failed(contracted.contract(), 2));
+            }
+            if (expected.equals("HELD")) {
+                paymentEvent(contracted, PaymentEventFixtures.processed(contracted.contract(), 3));
+            }
+            providerContract(contracted.contractId())
+                    .andExpect(jsonPath("$.paymentStatus").value(expected));
+            clientContract(contracted.requestId())
+                    .andExpect(jsonPath("$.paymentStatus").value(expected));
+            mockMvc.perform(get("/api/services/contracts").with(professional(PROVIDER)))
+                    .andExpect(jsonPath("$[0].paymentStatus").value(expected));
+        }
+    }
+
+    @Test
+    void laRespuestaDelPagoNoTraeImportesNiDatosDeLaBilletera() throws Exception {
+        Contracted contracted = contractedWithoutPayment();
+        paymentEvent(contracted, PaymentEventFixtures.processed(contracted.contract(), 2));
+
+        String body = providerContract(contracted.contractId()).andReturn().getResponse().getContentAsString();
+
+        assertThat(body).doesNotContain("commission", "wallet", "balance", "failureReason", "120750");
     }
 
     // ---------- Consultar ----------
