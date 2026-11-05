@@ -355,8 +355,14 @@ class ServiceRequestTest {
         started.selectProvider(PROVIDER, NOW);
         started.contract(NOW);
         started.start(NOW);
+        // TECHNICIAN_FINISHED también llega a IN_PROGRESS en la máquina de estados (la objeción), pero eso no es iniciar.
+        ServiceRequest technicianFinished = published();
+        technicianFinished.selectProvider(PROVIDER, NOW);
+        technicianFinished.contract(NOW);
+        technicianFinished.start(NOW);
+        technicianFinished.finish(NOW.plusSeconds(30));
 
-        for (ServiceRequest request : List.of(published, selected, started)) {
+        for (ServiceRequest request : List.of(published, selected, started, technicianFinished)) {
             ServiceRequestStatus before = request.getStatus();
             assertThatThrownBy(() -> request.start(NOW.plusSeconds(1)))
                     .isInstanceOf(InvalidStatusTransitionException.class)
@@ -440,9 +446,19 @@ class ServiceRequestTest {
 
     @Test
     void soloSePuedeObjetarUnServicioFinalizado() {
-        for (ServiceRequest request : List.of(inProgress(), published())) {
+        ServiceRequest selected = published();
+        selected.selectProvider(PROVIDER, NOW);
+        // CONTRACTED también llega a IN_PROGRESS en la máquina de estados (el inicio), pero objetar no es iniciar:
+        // sin este límite la objeción esquivaría la exigencia de pago retenido (GC-490).
+        ServiceRequest contracted = published();
+        contracted.selectProvider(PROVIDER, NOW);
+        contracted.contract(NOW);
+
+        for (ServiceRequest request : List.of(inProgress(), published(), selected, contracted)) {
+            ServiceRequestStatus before = request.getStatus();
             assertThatThrownBy(() -> request.objectClosure(NOW.plusSeconds(1)))
                     .isInstanceOf(InvalidStatusTransitionException.class);
+            assertThat(request.getStatus()).isEqualTo(before);
         }
     }
 
