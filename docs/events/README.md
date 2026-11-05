@@ -80,6 +80,7 @@ aceptar una cotización ya aceptada con el contrato ya creado) no publica otro e
 | `solicitud.publicada` | `ServiceRequestService#create` (RF-020) | Cliente | Categoría, descripción, ubicación **aproximada**, momento esperado, número de fotos |
 | `postulacion.registrada` | `ApplicationService#apply` (RF-024, GC-423) | Técnico | Postulación, prestador y **precio propuesto** |
 | `prestador.seleccionado` | `ServiceRequestService#selectProvider` (RF-026 a RF-028) | Cliente | Postulación y prestador elegidos, su precio, postulaciones rechazadas |
+| `solicitud.cancelada` | `ServiceRequestService#cancel` (GC-515) | Cliente | Estado anterior (`PUBLISHED` o `PROVIDER_SELECTED`), prestador que estaba seleccionado, postulaciones rechazadas. Solo antes de contratar |
 | `cotizacion.enviada` | `QuotationService#send` (RF-031) | Técnico | Precio, alcance, condiciones, fecha acordada, vigencia, cotizaciones que reemplaza o vence y, opcional, el número de versión (`revision`, GC-427) |
 | `cotizacion.rechazada` | `QuotationService#reject` (RF-032, RF-033) | Cliente | Cotización y precio rechazados |
 | `servicio.contratado` | `QuotationService#accept`, al crear el contrato (RF-034, RF-035, ADR-046) | Cliente | Copia inmutable de lo contratado: precio, alcance, condiciones, fecha acordada y de contratación |
@@ -103,7 +104,6 @@ porque ambas cosas ocurren en la misma transacción y el contrato ya trae la cot
 | Evento | Productor previsto | Depende de |
 | --- | --- | --- |
 | `solicitud.vencida`, `cotizacion.vencida` | `ms-services` (proceso programado, DEC-S4-11) | Que exista el proceso que vence solicitudes y cotizaciones |
-| `solicitud.cancelada` | `ms-services` | Que exista la cancelación en la API |
 | `evaluacion.registrada` | `ms-users`, con su propio Outbox y tópico (`fixia.users.evaluations`); contrato y esquema en `ms-users/docs/events` (GC-443) | GC-444 |
 
 Un evento reservado se agrega a este contrato con su esquema antes de publicarse; mientras no tenga esquema, el

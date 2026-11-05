@@ -52,26 +52,40 @@ public class OutboxRelayService {
     /**
      * Procesa un lote de eventos pendientes del Outbox en una transacción de base de datos.
      *
+     * <p>La consulta solo entrega, por solicitud, el primer evento pendiente (el orden por agregado es estricto). Para
+     * no publicar un solo evento por solicitud en cada ronda (GC-505), se hacen varias pasadas dentro de la misma
+     * transacción: tras cada pasada se sincroniza con la base y la siguiente ya ve publicados los anteriores, así que
+     * toma la secuencia siguiente. Se detiene al llenar el lote, cuando no quedan pendientes o cuando una pasada no
+     * logra publicar nada (por ejemplo, Kafka no responde), para no insistir en la misma ronda.
+     *
      * @param batchSize Número máximo de eventos a procesar en esta iteración.
      * @return Cantidad de eventos procesados (publicados o fallidos).
      */
     @Transactional
     public int processBatch(int batchSize) {
-        Instant now = Instant.now();
-        List<OutboxEvent> candidates = repository.findPendingForRelay(now, batchSize);
+        int processed = 0;
+        while (processed < batchSize) {
+            List<OutboxEvent> candidates = repository.findPendingForRelay(Instant.now(), batchSize - processed);
+            if (candidates.isEmpty()) {
+                break;
+            }
 
-        if (candidates.isEmpty()) {
-            return 0;
+            log.debug("Procesando {} eventos pendientes del Outbox", candidates.size());
+
+            boolean anyPublished = false;
+            for (OutboxEvent event : candidates) {
+                publishSingleEvent(event);
+                repository.save(event);
+                anyPublished |= event.getStatus() == OutboxStatus.PUBLISHED;
+            }
+            processed += candidates.size();
+            if (!anyPublished) {
+                break;
+            }
+            // La siguiente consulta (nativa) debe ver como PUBLISHED lo que se acaba de publicar.
+            repository.flush();
         }
-
-        log.debug("Procesando lote de {} eventos pendientes del Outbox", candidates.size());
-
-        for (OutboxEvent event : candidates) {
-            publishSingleEvent(event);
-            repository.save(event);
-        }
-
-        return candidates.size();
+        return processed;
     }
 
     private void publishSingleEvent(OutboxEvent event) {
