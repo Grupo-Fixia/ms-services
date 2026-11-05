@@ -481,6 +481,40 @@ class FinishAndCloseControllerTest {
         assertThat(events(inProgress.requestId(), "servicio.cierre_objetado")).isEmpty();
     }
 
+    @Test
+    void objetarUnServicioContratadoSinPagoEsConflictoYNoEsUnInicioEncubierto() throws Exception {
+        // Regresión GC-490: CONTRACTED -> IN_PROGRESS es válida en la máquina de estados, pero solo como inicio.
+        Service contracted = contracted();
+        int events = events(contracted.requestId()).size();
+        int transitions = timeline(contracted.requestId()).size();
+
+        objection(CLIENT, contracted.requestId(), REASON).andExpect(status().isConflict());
+
+        assertThat(statusOf(contracted.requestId())).isEqualTo(ServiceRequestStatus.CONTRACTED);
+        assertThat(events(contracted.requestId(), "servicio.cierre_objetado")).isEmpty();
+        assertThat(events(contracted.requestId())).hasSize(events);
+        assertThat(timeline(contracted.requestId())).hasSize(transitions);
+        // La compuerta del pago sigue en pie: sin saldo retenido el inicio sigue siendo 409.
+        start(PROVIDER, contracted.contractId())
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.title").value("Pago no retenido"));
+        assertThat(statusOf(contracted.requestId())).isEqualTo(ServiceRequestStatus.CONTRACTED);
+    }
+
+    @Test
+    void iniciarUnServicioYaFinalizadoEsConflictoYNoLoVuelveAEnCurso() throws Exception {
+        Service finished = finished();
+        int events = events(finished.requestId()).size();
+        int transitions = timeline(finished.requestId()).size();
+
+        start(PROVIDER, finished.contractId()).andExpect(status().isConflict());
+
+        assertThat(statusOf(finished.requestId())).isEqualTo(ServiceRequestStatus.TECHNICIAN_FINISHED);
+        assertThat(events(finished.requestId(), "servicio.iniciado")).hasSize(1);
+        assertThat(events(finished.requestId())).hasSize(events);
+        assertThat(timeline(finished.requestId())).hasSize(transitions);
+    }
+
     // ---------- Un servicio cerrado no se reabre ----------
 
     @Test
