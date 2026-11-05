@@ -20,9 +20,36 @@ solicitudes (GC-333) y, en tareas posteriores, postulaciones, selección de pres
 | `MATCHING_BASE_URL` | URL interna de ms-matching-geo (técnicos compatibles, GC-474); usa la misma `INTERNAL_API_KEY` | `http://ms-matching-geo:8000` |
 | `MATCHING_CONNECT_TIMEOUT` / `MATCHING_READ_TIMEOUT` | Esperas hacia ms-matching-geo (la lectura es mayor: matching puede hacer hasta 3 consultas a ms-users) | `1s` / `8s` |
 | `USERS_CONNECT_TIMEOUT` / `USERS_READ_TIMEOUT` | Tiempos de espera hacia ms-users | `1s` / `2s` |
+| `KAFKA_BOOTSTRAP_SERVERS` | Broker Kafka: el relay del Outbox publica y el consumidor de pagos (GC-490) lee | `localhost:9092` |
+| `FIXIA_PAYMENTS_CONSUMER_ENABLED` | Enciende el consumidor de `fixia.payments.events` (GC-490). Apagado, ningún servicio puede iniciar: nadie confirma el pago | `true` |
+| `FIXIA_PAYMENTS_TOPIC` / `FIXIA_PAYMENTS_CONSUMER_GROUP` | Tópico y grupo del consumidor de pagos; el tópico lo crea DevOps (3 particiones) | `fixia.payments.events` / `ms-services` |
+| `FIXIA_PAYMENTS_CONSUMER_RETRY_DELAY_MS` | Espera antes de reintentar un mensaje que no se pudo guardar (base caída) | `5000` |
 
 Sin `JWT_PUBLIC_KEY` el servicio **no arranca** (salvo en `local` y `test`, que usan una clave efímera). Las claves
 y la clave interna nunca se guardan en el repositorio.
+
+## Pago retenido antes de iniciar el servicio (GC-490)
+
+ms-services **no genera saldo ni mueve dinero**: el pago virtual lo retiene ms-payments al contratar. Este servicio solo
+recuerda, por contratación, lo que ms-payments le confirmó, y con eso decide si el prestador puede iniciar.
+
+- **Consumidor.** Lee `fixia.payments.events` (grupo `ms-services`, confirmación manual después de guardar). `pago.procesado`
+  deja el pago `HELD` (saldo retenido); `pago.fallido`, `FAILED`. Sin ninguno, el pago está `PENDING`. Se guarda en
+  `contract_payments` (migración V16); no hay importes ni motivos de fallo.
+- **Idempotente.** Cada evento se registra por su `eventId` en `processed_events`: una reentrega no hace nada. Un hecho
+  con `aggregate.sequence` menor o igual al último aplicado llegó tarde y se ignora, así un `pago.fallido` atrasado no
+  deshace una retención. Tras un fallo, si el cliente recarga y reintenta, el siguiente `pago.procesado` pasa el pago a `HELD`.
+- **Inconsistente no autoriza.** Si el evento no cuadra con la contratación (otra solicitud, cliente, prestador, valor o
+  moneda) o la contratación no existe, se descarta con un error en el log y no se autoriza nada. Un mensaje que no
+  cumple el contrato se registra (sin su contenido) y se salta.
+- **Inicio.** `POST /api/services/contracts/{contractId}/start` responde **409 «Pago no retenido»** si el pago no está
+  `HELD`, sin cambiar estado, historial ni Outbox. Repetir el inicio sobre un servicio ya en curso sigue siendo 200.
+- **Consulta.** El contrato (`GET /contracts`, `GET /contracts/{id}`, `GET /requests/{id}/contract`) trae `paymentStatus`:
+  `PENDING`, `HELD` o `FAILED`.
+- **Qué pasa con lo anterior.** Una contratación hecha antes de esta funcionalidad no tiene pago retenido y no puede
+  iniciar (409) hasta que ms-payments publique su `pago.procesado`.
+
+Contrato de los eventos: `ms-payments/docs/events` y [docs/events/README.md](docs/events/README.md) §15.
 
 ## Seguridad
 
@@ -176,6 +203,10 @@ devuelve hasta que la solicitud está contratada (`CONTRACTED`) o en curso (`IN_
   ms-users. Un prestador que ms-users ya no reconoce como técnico activo sale con `provider: null`; si ms-users no
   responde, 503 "Perfiles no disponibles" (no se muestran perfiles a medias ni inventados). Nunca se entregan correo,
   teléfono, documento ni ubicación del prestador.
+- **Reputación real (GC-446):** el perfil del técnico trae también `reputation: {"average": 4.3, "count": 3}`
+  (promedio de 1 a 5 con un decimal y número de evaluaciones de clientes) o `null` si aún no tiene. La calcula ms-users
+  a partir de sus evaluaciones originales; ms-services solo la reenvía, no la guarda. La empresa (`provider` de una
+  postulación de empresa) no tiene reputación propia en este sprint; la del técnico ejecutor va en `executor`.
 - **Postulaciones de empresa (GC-468):** `provider` es la empresa (solo `displayName` con su nombre comercial, que
   ms-services pide en `POST /internal/companies/public-profiles`) y `executor` es el perfil público del técnico que
   propone. En las de un técnico independiente, `executor` es `null`: el prestador es el mismo que ejecuta. Sin

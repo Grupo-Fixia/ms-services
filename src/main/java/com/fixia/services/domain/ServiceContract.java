@@ -19,8 +19,9 @@ import java.util.UUID;
  * acepta una cotización vigente y conserva una copia de las condiciones acordadas (valor, moneda, alcance,
  * condiciones y fecha del servicio). Es inmutable: ninguna cotización posterior la cambia.
  *
- * <p>El pago del servicio ocurre fuera de Fixia (RN-005, RN-006, CA-04): aquí no hay saldo, retención ni pago. El estado
- * del servicio es el de la solicitud ({@link ServiceRequestStatus#CONTRACTED}), no se duplica.
+ * <p>Aquí no hay saldo, retención ni pago: la contratación es inmutable. El pago virtual retenido que ms-payments
+ * confirma vive aparte, en {@link ContractPayment} (GC-490). El estado del servicio es el de la solicitud
+ * ({@link ServiceRequestStatus#CONTRACTED}), no se duplica.
  */
 @Entity
 @Table(name = "service_contracts")

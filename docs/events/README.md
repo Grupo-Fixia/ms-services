@@ -294,3 +294,34 @@ pendiente.
 - **Arquitectura de Datos V2:** §1.6.1 (sin pull a la API del dueño), §1.6.2 (RustFS en lugar de MongoDB) y §1.7
   (`OUTBOX_INGESTA` no se implementa en este sprint) (GC-455).
 - **DD y SDD:** catálogo de eventos, tópico y Outbox (GC-454 y GC-455).
+
+## 15. Eventos que consume `ms-services` (GC-490)
+
+Hasta GC-490 `ms-services` solo producía. Ahora también lee `fixia.payments.events`, el tópico que publica `ms-payments`
+con su propio Outbox (contrato, esquemas y ejemplos en `ms-payments/docs/events`). Se leen solo dos tipos; los demás
+hechos de pagos se registran como procesados y se ignoran.
+
+| `eventType` | Qué hace `ms-services` | `data` que usa |
+| --- | --- | --- |
+| `pago.procesado` | El total quedó **retenido**: el pago de la contratación pasa a `HELD` y el servicio puede iniciar | `contractId`, `serviceRequestId`, `clientId`, `providerId`, `breakdown.price` |
+| `pago.fallido` | No se pudo retener (p. ej. saldo insuficiente): el pago pasa a `FAILED`; el servicio no puede iniciar | `contractId`, `serviceRequestId`, `clientId`, `providerId` |
+| `pago.creado`, `pago.completado`, `pago.reembolsado` | Nada: no deciden el inicio | |
+
+**Reglas del consumidor**
+
+- **Al menos una vez.** El offset se confirma solo después de guardar el efecto. Si la base falla, el mensaje se reintenta
+  (sin límite, cada 5 s) y no se salta.
+- **Idempotencia por `eventId`.** La tabla `processed_events` (migración V16) guarda los ya aplicados.
+- **Orden por `aggregate.sequence`.** El pago guarda la última secuencia aplicada; un hecho con una menor o igual se ignora.
+  Un `pago.procesado` posterior a un `pago.fallido` (el cliente recargó y reintentó) vuelve a dejar el pago en `HELD`.
+- **Coherencia.** El hecho debe corresponder a la contratación (`contractId` existente, misma solicitud, cliente y
+  prestador y, para la retención, `breakdown.price` igual al valor del contrato y misma moneda). Si no, se descarta y no
+  se autoriza nada.
+- **Lector tolerante.** Se ignoran los campos que `ms-services` no usa; un campo nuevo dentro de la versión 1 no rompe el consumo.
+- **Mensaje inválido.** Sin `eventId`, `eventType`, `aggregate.sequence` o `data`, o con un campo obligatorio mal formado,
+  se registra dónde estaba (tópico, partición y offset), nunca su contenido, y se salta.
+- **Privacidad.** No se guarda el importe retenido ni `failureReason` (trae cifras del saldo del cliente): solo el estado.
+
+Lo que ve la API es `paymentStatus` (`PENDING`, `HELD` o `FAILED`) en el contrato, y el `409 «Pago no retenido»` al iniciar
+sin `HELD`. Pendiente fuera de este alcance: `pago.reembolsado` con `kind=RELEASE` antes de iniciar (un administrador
+libera lo retenido) debería devolver el pago a un estado que no autorice el inicio.

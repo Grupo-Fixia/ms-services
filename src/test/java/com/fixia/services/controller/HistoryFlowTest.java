@@ -13,6 +13,7 @@ import com.fixia.services.repository.ServiceRequestTransitionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
@@ -57,6 +58,9 @@ class HistoryFlowTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
 
     @Autowired
     private ObjectMapper objectMapper;
@@ -156,6 +160,8 @@ class HistoryFlowTest {
                 "ROLE_CLIENT", null).andExpect(status().isOk());
         UUID contractId = UUID.fromString(getJson("/api/services/requests/" + request + "/contract", clientId,
                 "ROLE_CLIENT").get("id").asText());
+        // ms-payments ya retuvo el saldo: el servicio puede iniciar (GC-490)
+        ContractPayments.hold(jdbcTemplate, contractId);
         return new Service(request, contractId);
     }
 
