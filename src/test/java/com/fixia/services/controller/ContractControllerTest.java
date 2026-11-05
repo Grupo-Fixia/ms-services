@@ -60,6 +60,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @ActiveProfiles("test")
 class ContractControllerTest {
 
+    /**
+     * Fecha acordada distinta para cada contrato de la prueba (3 horas después de la anterior): un mismo prestador no
+     * puede quedar contratado dos veces a la misma hora ({@code ProviderScheduleGuard}).
+     */
+    private static final java.util.concurrent.atomic.AtomicInteger SLOT = new java.util.concurrent.atomic.AtomicInteger();
+
+    private static Instant nextFreeSlot(Instant now) {
+        return now.plus(Duration.ofDays(3)).plus(Duration.ofHours(3L * SLOT.incrementAndGet()));
+    }
+
     private static final UUID CLIENT = UUID.randomUUID();
     private static final UUID OTHER_CLIENT = UUID.randomUUID();
     private static final UUID PROVIDER = UUID.randomUUID();
@@ -112,7 +122,7 @@ class ContractControllerTest {
         Instant now = Instant.now();
         return quotationRepository.saveAndFlush(Quotation.send(request, PROVIDER, new BigDecimal("150000.50"),
                 CurrencyCode.COP, "Cambio de tubería del lavamanos", "Incluye materiales; pago al terminar",
-                now.plus(Duration.ofDays(3)), now.plus(Duration.ofDays(1)), 1, now));
+                nextFreeSlot(now), now.plus(Duration.ofDays(1)), 1, now));
     }
 
     private static RequestPostProcessor client(UUID id) {
@@ -149,7 +159,7 @@ class ContractControllerTest {
                 .content("""
                         {"serviceRequestId":"%s","amount":120000,"currency":"COP","scope":"Cambio de tubería",
                          "conditions":"Incluye materiales","agreedAt":"%s","validUntil":"%s"}
-                        """.formatted(requestId, now.plus(Duration.ofDays(3)), now.plus(Duration.ofDays(1)))));
+                        """.formatted(requestId, nextFreeSlot(now), now.plus(Duration.ofDays(1)))));
     }
 
     private List<Integer> concurrently(List<Callable<Integer>> tasks) throws Exception {
