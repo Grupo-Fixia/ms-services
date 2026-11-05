@@ -34,16 +34,19 @@ public class QuotationService {
     private final ContractService contractService;
     private final ServiceRequestHistory history;
     private final BusinessEventRecorder events;
+    private final ProviderScheduleGuard scheduleGuard;
     private final Clock clock;
 
     public QuotationService(ServiceRequestRepository serviceRequestRepository,
                             QuotationRepository quotationRepository, ContractService contractService,
-                            ServiceRequestHistory history, BusinessEventRecorder events, Clock clock) {
+                            ServiceRequestHistory history, BusinessEventRecorder events,
+                            ProviderScheduleGuard scheduleGuard, Clock clock) {
         this.serviceRequestRepository = serviceRequestRepository;
         this.quotationRepository = quotationRepository;
         this.contractService = contractService;
         this.history = history;
         this.events = events;
+        this.scheduleGuard = scheduleGuard;
         this.clock = clock;
     }
 
@@ -58,6 +61,8 @@ public class QuotationService {
      *       prestador seleccionado (409). El mensaje es el mismo en ambos casos, para no revelar a quién se eligió.
      *   <li>La solicitud no puede tener ya una cotización aceptada (409).
      *   <li>El dominio valida valor, textos y fechas (400).
+     *   <li>El prestador no puede tener otro servicio contratado y sin terminar a esa misma hora (409,
+     *       {@link ProviderScheduleGuard}).
      *   <li>La cotización {@code SENT} anterior, si la hay, queda {@code SUPERSEDED} (o {@code EXPIRED} si su vigencia
      *       ya pasó): una solicitud tiene a lo sumo una cotización esperando respuesta y ninguna versión anterior
      *       puede aceptarse (RF-033).
@@ -87,6 +92,7 @@ public class QuotationService {
             // Reglas del dominio que la validación del cuerpo no cubre (fechas frente al reloj del servicio).
             throw new InvalidQuotationException(e.getMessage(), e);
         }
+        scheduleGuard.ensureAvailable(providerId, quotation.getAgreedAt(), request.getId());
 
         List<Quotation> replaced = quotationRepository.findByServiceRequestIdAndStatus(request.getId(),
                 QuotationStatus.SENT);
@@ -166,7 +172,8 @@ public class QuotationService {
      *       acepta ni se rechaza (409), de modo que ninguna versión anterior o modificada se acepta sin una nueva
      *       cotización (RF-033).
      *   <li>La solicitud debe seguir con prestador seleccionado, y la cotización ser de ese prestador (409).
-     *   <li>Aceptar exige que no haya ya otra aceptada (409) y que la cotización esté vigente.
+     *   <li>Aceptar exige que no haya ya otra aceptada (409), que la cotización esté vigente y que el prestador no haya
+     *       quedado contratado en otro servicio a esa misma hora mientras tanto (409, {@link ProviderScheduleGuard}).
      * </ol>
      */
     private Quotation respond(UUID clientId, UUID serviceRequestId, UUID quotationId, QuotationStatus decision) {
@@ -192,6 +199,7 @@ public class QuotationService {
                     QuotationStatus.ACCEPTED).isPresent()) {
                 throw new QuotationNotAllowedException("La solicitud ya tiene una cotización aceptada");
             }
+            scheduleGuard.ensureAvailable(quotation.getProviderId(), quotation.getAgreedAt(), request.getId());
             quotation.accept(now);
             contract(request, quotation, now);
         } else {

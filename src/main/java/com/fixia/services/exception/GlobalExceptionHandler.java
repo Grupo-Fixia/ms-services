@@ -202,6 +202,13 @@ public class GlobalExceptionHandler {
         return problem;
     }
 
+    @ExceptionHandler(ScheduleConflictException.class)
+    public ProblemDetail handleScheduleConflict(ScheduleConflictException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Horario ocupado");
+        return problem;
+    }
+
     @ExceptionHandler(InvalidQuotationTransitionException.class)
     public ProblemDetail handleInvalidQuotationTransition(InvalidQuotationTransitionException ex) {
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
