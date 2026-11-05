@@ -205,8 +205,12 @@ public class ServiceRequest {
         transitionTo(ServiceRequestStatus.CONTRACTED, now);
     }
 
-    /** El prestador contratado inicia el servicio (GC-437). Solo se puede desde {@code CONTRACTED}. */
+    /**
+     * El prestador contratado inicia el servicio (GC-437). Solo se puede desde {@code CONTRACTED}: {@code IN_PROGRESS}
+     * también es destino desde {@code TECHNICIAN_FINISHED} (la objeción del cliente), pero eso no es un inicio.
+     */
     public void start(Instant now) {
+        requireOrigin(ServiceRequestStatus.CONTRACTED, ServiceRequestStatus.IN_PROGRESS);
         transitionTo(ServiceRequestStatus.IN_PROGRESS, now);
     }
 
@@ -222,9 +226,11 @@ public class ServiceRequest {
 
     /**
      * El cliente objeta el cierre (GC-441): el servicio vuelve a {@code IN_PROGRESS} en vez de cerrarse. Solo desde
-     * {@code TECHNICIAN_FINISHED}: un servicio cerrado no se reabre.
+     * {@code TECHNICIAN_FINISHED}: un servicio cerrado no se reabre, y uno {@code CONTRACTED} no puede pasar a
+     * {@code IN_PROGRESS} objetando, porque esquivaría el inicio y la exigencia de pago retenido (GC-490).
      */
     public void objectClosure(Instant now) {
+        requireOrigin(ServiceRequestStatus.TECHNICIAN_FINISHED, ServiceRequestStatus.IN_PROGRESS);
         transitionTo(ServiceRequestStatus.IN_PROGRESS, now);
     }
 
@@ -248,6 +254,16 @@ public class ServiceRequest {
             return Optional.empty();
         }
         return Optional.of(new ExactLocation(exactAddress, exactLatitude, exactLongitude));
+    }
+
+    /**
+     * Para los destinos que la máquina de estados alcanza desde más de un origen: cada operación exige el suyo, y no
+     * basta con que la transición sea válida.
+     */
+    private void requireOrigin(ServiceRequestStatus expected, ServiceRequestStatus target) {
+        if (status != expected) {
+            throw new InvalidStatusTransitionException(status, target);
+        }
     }
 
     private void transitionTo(ServiceRequestStatus target, Instant now) {
