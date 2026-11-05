@@ -83,6 +83,15 @@ public class ServiceRequestController {
     }
 
     /**
+     * El cliente cancela una solicitud propia antes de contratar (GC-515): desde {@code PUBLISHED} o
+     * {@code PROVIDER_SELECTED}. Repetirla devuelve el estado actual; contratada o en un estado terminal, 409.
+     */
+    @PostMapping("/{id}/cancellation")
+    public ServiceRequestResponse cancel(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return ServiceRequestResponse.from(service.cancel(clientId(jwt), id));
+    }
+
+    /**
      * Si el "sub" no tiene el formato esperado la sesión se trata como inválida: la excepción de
      * autenticación llega al mismo 401 que cualquier otro token inválido.
      */

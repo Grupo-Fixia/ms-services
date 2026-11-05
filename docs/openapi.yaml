@@ -217,6 +217,39 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
 
+  /api/services/requests/{id}/cancellation:
+    post:
+      summary: Cancelar una de mis solicitudes antes de contratar (GC-515)
+      description: |
+        Solo el cliente dueño, y solo mientras la solicitud está `PUBLISHED` o `PROVIDER_SELECTED`: un servicio
+        contratado no se cancela. En una sola transacción la solicitud pasa a `CANCELLED` y las postulaciones que
+        seguían pendientes a `REJECTED`; se registra `solicitud.cancelada`. Repetir la cancelación responde 200 con el
+        estado actual. Contratada, en curso, cerrada o vencida responde 409. Si la solicitud no existe o es de otro
+        cliente (o el identificador no es un UUID), la respuesta es la misma 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Solicitud cancelada.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServiceRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: La solicitud ya no se puede cancelar (ya se contrató o terminó).
   /api/services/requests/{id}/applications/{applicationId}/selection:
     post:
       summary: Seleccionar al prestador de una de mis solicitudes (GC-348)

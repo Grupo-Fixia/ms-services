@@ -145,6 +145,48 @@ public class ServiceRequestService {
         return request;
     }
 
+    /**
+     * El cliente cancela su solicitud (GC-515). Solo antes de contratar: desde {@code PUBLISHED} o
+     * {@code PROVIDER_SELECTED}. Un servicio contratado no se cancela, así que nunca hay saldo retenido que liberar.
+     *
+     * <p>En una sola transacción y con la solicitud bloqueada (la misma fila que toman la postulación, la selección, la
+     * cotización y su aceptación, así que no se cruza con ellas): la solicitud pasa a {@code CANCELLED}, las
+     * postulaciones que seguían pendientes a {@code REJECTED}, queda la transición en el historial y se registra
+     * {@code solicitud.cancelada}. Una cotización enviada ya no se puede aceptar, porque la solicitud dejó de tener
+     * prestador seleccionado vigente.
+     *
+     * <p>Una solicitud ajena o inexistente responde 404. Repetir la cancelación de una ya cancelada devuelve el estado
+     * actual sin cambiar nada ni publicar otro evento. En cualquier otro estado (contratada, en curso, cerrada,
+     * vencida) responde 409.
+     */
+    @Transactional
+    public ServiceRequest cancel(UUID clientId, UUID requestId) {
+        ServiceRequest request = repository.findByIdAndClientIdForUpdate(requestId, clientId)
+                .orElseThrow(ServiceRequestNotFoundException::new);
+        ServiceRequestStatus previous = request.getStatus();
+        if (previous == ServiceRequestStatus.CANCELLED) {
+            request.getPhotoKeys();
+            return request;
+        }
+        if (previous != ServiceRequestStatus.PUBLISHED && previous != ServiceRequestStatus.PROVIDER_SELECTED) {
+            throw new ServiceRequestNotAvailableException("Solo se puede cancelar una solicitud antes de contratar");
+        }
+
+        Instant now = clock.instant();
+        List<ServiceRequestApplication> rejected = applicationRepository
+                .findByServiceRequestIdOrderByCreatedAtAscIdAsc(requestId).stream()
+                .filter(application -> application.getStatus() == ApplicationStatus.APPLIED)
+                .toList();
+        rejected.forEach(application -> application.reject(now));
+        request.cancel(now);
+        history.record(request.getId(), previous, ServiceRequestStatus.CANCELLED, clientId, ActorRole.CLIENT, null,
+                now);
+        events.record(BusinessEvents.requestCancelled(request, previous, rejected, now), request.getId(),
+                BusinessEvents.Actor.client(clientId), now);
+        request.getPhotoKeys();
+        return request;
+    }
+
     /** La solicitud ya tiene prestador y la postulación indicada es justamente la elegida. */
     private boolean isRepeatedSelection(ServiceRequest request, UUID applicationId) {
         return request.getStatus() == ServiceRequestStatus.PROVIDER_SELECTED
