@@ -1,6 +1,7 @@
 package com.fixia.services.domain;
 
 import com.fixia.services.exception.InvalidStatusTransitionException;
+import com.fixia.services.exception.ServiceRequestNotAvailableException;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -232,6 +233,34 @@ public class ServiceRequest {
     public void objectClosure(Instant now) {
         requireOrigin(ServiceRequestStatus.TECHNICIAN_FINISHED, ServiceRequestStatus.IN_PROGRESS);
         transitionTo(ServiceRequestStatus.IN_PROGRESS, now);
+    }
+
+    /**
+     * El cliente corrige la dirección exacta (GC-514). Solo antes de contratar ({@code PUBLISHED} o
+     * {@code PROVIDER_SELECTED}): desde la contratación la dirección ya se entregó al prestador y no cambia.
+     *
+     * @return {@code true} si cambió algo; {@code false} si era la misma dirección
+     * @throws ServiceRequestNotAvailableException si la solicitud ya está contratada o terminó
+     * @throws IllegalArgumentException            si la dirección o las coordenadas no son válidas
+     */
+    public boolean changeExactLocation(ExactLocation exact, Instant now) {
+        if (status != ServiceRequestStatus.PUBLISHED && status != ServiceRequestStatus.PROVIDER_SELECTED) {
+            throw new ServiceRequestNotAvailableException(
+                    "Solo se puede cambiar la dirección exacta antes de contratar");
+        }
+        require(exact != null, "La dirección exacta es obligatoria");
+        requireText(exact.address(), "La dirección exacta no puede estar vacía", MAX_ADDRESS_LENGTH);
+        requireCoordinates(exact.latitude(), exact.longitude(), "exacta");
+        String address = exact.address().strip();
+        if (address.equals(exactAddress) && java.util.Objects.equals(exact.latitude(), exactLatitude)
+                && java.util.Objects.equals(exact.longitude(), exactLongitude)) {
+            return false;
+        }
+        this.exactAddress = address;
+        this.exactLatitude = exact.latitude();
+        this.exactLongitude = exact.longitude();
+        this.updatedAt = now;
+        return true;
     }
 
     public void cancel(Instant now) {
