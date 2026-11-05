@@ -8,6 +8,7 @@ import com.fixia.services.domain.ServiceRequest;
 import com.fixia.services.domain.ServiceRequestApplication;
 import com.fixia.services.domain.ServiceRequestStatus;
 import com.fixia.services.dto.CreateServiceRequestRequest;
+import com.fixia.services.dto.ExactLocationRequest;
 import com.fixia.services.exception.ApplicationNotFoundException;
 import com.fixia.services.exception.InvalidServiceRequestException;
 import com.fixia.services.exception.ServiceRequestNotAvailableException;
@@ -141,6 +142,25 @@ public class ServiceRequestService {
         // Solo hay evento cuando la selección ocurre; el reintento de arriba no publica nada (GC-433).
         events.record(BusinessEvents.providerSelected(request, chosen, rejected, now), request.getId(),
                 BusinessEvents.Actor.client(clientId), now);
+        request.getPhotoKeys();
+        return request;
+    }
+
+    /**
+     * El cliente corrige la dirección exacta de su solicitud (GC-514), solo antes de contratar. Con la solicitud
+     * bloqueada, para no cruzarse con una aceptación que la contrate al mismo tiempo. La dirección no viaja en ningún
+     * evento ni en el historial (es un dato protegido, ADR-009); ajena o inexistente responde 404, contratada 409.
+     */
+    @Transactional
+    public ServiceRequest changeExactLocation(UUID clientId, UUID requestId, ExactLocationRequest body) {
+        ServiceRequest request = repository.findByIdAndClientIdForUpdate(requestId, clientId)
+                .orElseThrow(ServiceRequestNotFoundException::new);
+        try {
+            request.changeExactLocation(new ExactLocation(body.address(), body.latitude(), body.longitude()),
+                    clock.instant());
+        } catch (IllegalArgumentException e) {
+            throw new InvalidServiceRequestException(e.getMessage(), e);
+        }
         request.getPhotoKeys();
         return request;
     }
