@@ -1316,6 +1316,130 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/services/contracts/{contractId}/messages:
+    get:
+      summary: Leer el chat del servicio (técnico que ejecuta, GC-527)
+      description: |
+        Solo `ROLE_PROFESSIONAL`, el ejecutor del contrato. Mensajes en orden de envío; con `after` solo los posteriores (para preguntar si llegó algo nuevo).
+        `open` dice si el servicio todavía admite mensajes. Contrato: `docs/contracts/mensajeria.md`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: contractId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: after, in: query, description: 'El nextCursor anterior: solo llegan los mensajes posteriores.', schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: wait, in: query, description: 'Long polling: sin mensajes nuevos, espera hasta estos segundos a que llegue uno.', schema: { type: integer, minimum: 0, maximum: 25, default: 0 } }
+      responses:
+        '200':
+          description: Página de la conversación.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagePage'
+        '400':
+          description: Límite, cursor o espera inválidos.
+        '401':
+          description: Sin sesión válida.
+        '403':
+          description: Rol que no corresponde (incluida la empresa, que no participa del chat).
+        '404':
+          description: Ajena, inexistente o sin contratar.
+    post:
+      summary: Enviar un mensaje (técnico que ejecuta, GC-527)
+      description: |
+        Solo `ROLE_PROFESSIONAL`, el ejecutor del contrato. Repetir con el mismo `clientMessageId` y el mismo texto devuelve 200 con el mensaje ya guardado;
+        con otro texto, 409. Servicio cerrado, 409.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: contractId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessage'
+      responses:
+        '201':
+          description: Mensaje enviado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '200':
+          description: Reintento del mismo envío; no se duplica.
+        '400':
+          description: Texto vacío o de más de 2000 caracteres.
+        '401':
+          description: Sin sesión válida.
+        '403':
+          description: Rol que no corresponde.
+        '404':
+          description: Ajena, inexistente o sin contratar.
+        '409':
+          description: Conversación cerrada, o clientMessageId reutilizado con otro texto.
+  /api/services/requests/{serviceRequestId}/messages:
+    get:
+      summary: Leer el chat del servicio (cliente, GC-527)
+      description: |
+        Solo `ROLE_CLIENT`, el dueño de la solicitud. Mensajes en orden de envío; con `after` solo los posteriores (para preguntar si llegó algo nuevo).
+        `open` dice si el servicio todavía admite mensajes. Contrato: `docs/contracts/mensajeria.md`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: serviceRequestId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: after, in: query, description: 'El nextCursor anterior: solo llegan los mensajes posteriores.', schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: wait, in: query, description: 'Long polling: sin mensajes nuevos, espera hasta estos segundos a que llegue uno.', schema: { type: integer, minimum: 0, maximum: 25, default: 0 } }
+      responses:
+        '200':
+          description: Página de la conversación.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MessagePage'
+        '400':
+          description: Límite, cursor o espera inválidos.
+        '401':
+          description: Sin sesión válida.
+        '403':
+          description: Rol que no corresponde (incluida la empresa, que no participa del chat).
+        '404':
+          description: Ajena, inexistente o sin contratar.
+    post:
+      summary: Enviar un mensaje (cliente, GC-527)
+      description: |
+        Solo `ROLE_CLIENT`, el dueño de la solicitud. Repetir con el mismo `clientMessageId` y el mismo texto devuelve 200 con el mensaje ya guardado;
+        con otro texto, 409. Servicio cerrado, 409.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: serviceRequestId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SendMessage'
+      responses:
+        '201':
+          description: Mensaje enviado.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+        '200':
+          description: Reintento del mismo envío; no se duplica.
+        '400':
+          description: Texto vacío o de más de 2000 caracteres.
+        '401':
+          description: Sin sesión válida.
+        '403':
+          description: Rol que no corresponde.
+        '404':
+          description: Ajena, inexistente o sin contratar.
+        '409':
+          description: Conversación cerrada, o clientMessageId reutilizado con otro texto.
 components:
   securitySchemes:
     internalApiKey:
@@ -1409,6 +1533,34 @@ components:
               - { field: description, message: La descripción es obligatoria }
 
   schemas:
+    SendMessage:
+      type: object
+      required: [body]
+      properties:
+        body: { type: string, minLength: 1, maxLength: 2000 }
+        clientMessageId: { type: string, format: uuid, description: 'Opcional; reintentar con el mismo no duplica.' }
+    Message:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        contractId: { type: string, format: uuid }
+        serviceRequestId: { type: string, format: uuid }
+        senderId: { type: string, format: uuid }
+        senderRole: { type: string, enum: [CLIENT, PROFESSIONAL] }
+        recipientId: { type: string, format: uuid }
+        body: { type: string }
+        clientMessageId: { type: string, format: uuid, nullable: true }
+        createdAt: { type: string, format: date-time }
+        mine: { type: boolean, description: 'Lo envió quien consulta.' }
+    MessagePage:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Message' }
+        nextCursor: { type: string, nullable: true, description: 'Para pedir lo siguiente o preguntar por lo nuevo (after).' }
+        hasMore: { type: boolean }
+        open: { type: boolean, description: 'El servicio todavía admite mensajes.' }
     ServiceCategory:
       type: string
       enum: [PLUMBING, ELECTRICAL, MAINTENANCE, LOCKSMITHING, PAINTING, CARPENTRY]

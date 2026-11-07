@@ -36,6 +36,8 @@ public class SecurityConfig {
                                 .hasAnyAuthority("ROLE_PROFESSIONAL", "ROLE_CLIENT", "ROLE_COMPANY")
                         // GC-551: la empresa prestadora consulta sus contrataciones y evidencias; iniciar, terminar y
                         // subir evidencias es solo del técnico designado.
+                        // GC-527: el chat del contrato es del técnico que ejecuta; la empresa no lo lee (RF-040).
+                        .requestMatchers("/api/services/contracts/*/messages").hasAuthority("ROLE_PROFESSIONAL")
                         .requestMatchers(HttpMethod.GET, "/api/services/contracts/**")
                                 .hasAnyAuthority("ROLE_PROFESSIONAL", "ROLE_COMPANY")
                         .requestMatchers("/api/services/contracts/**").hasAuthority("ROLE_PROFESSIONAL")
