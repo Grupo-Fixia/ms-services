@@ -1,5 +1,7 @@
 package com.fixia.services.service;
 
+import com.fixia.services.repository.ServiceContractRepository;
+import com.fixia.services.domain.ServiceContract;
 import com.fixia.services.domain.ApplicationStatus;
 import com.fixia.services.domain.ProviderType;
 import com.fixia.services.domain.ServiceRequest;
@@ -28,10 +30,13 @@ public class ParticipationService {
     private final ServiceRequestRepository requestRepository;
     private final ServiceRequestApplicationRepository applicationRepository;
     private final ServiceRequestTransitionRepository transitionRepository;
+    private final ServiceContractRepository contractRepository;
 
     public ParticipationService(ServiceRequestRepository requestRepository,
                                 ServiceRequestApplicationRepository applicationRepository,
-                                ServiceRequestTransitionRepository transitionRepository) {
+                                ServiceRequestTransitionRepository transitionRepository,
+                                ServiceContractRepository contractRepository) {
+        this.contractRepository = contractRepository;
         this.requestRepository = requestRepository;
         this.applicationRepository = applicationRepository;
         this.transitionRepository = transitionRepository;
@@ -48,7 +53,7 @@ public class ParticipationService {
         ProviderType providerType = providerId == null ? null : selectedProviderType(request, providerId);
         Instant closedAt = request.getStatus() == ServiceRequestStatus.CLOSED ? closedAt(serviceRequestId) : null;
         return new ParticipationResponse(request.getId(), request.getStatus(), request.getClientId(), providerId,
-                providerType, closedAt);
+                providerType, closedAt, executorOf(request, providerId));
     }
 
     /**
@@ -62,6 +67,25 @@ public class ParticipationService {
                 .map(ServiceRequestApplication::getProviderType)
                 .findFirst()
                 .orElse(ProviderType.INDEPENDENT);
+    }
+
+    /**
+     * Quién ejecuta el servicio (GC-551): el del contrato si ya se contrató; si no, el técnico designado de la postulación
+     * seleccionada (empresa) o el mismo prestador (independiente). Nulo si aún no hay prestador. ms-users evalúa a este
+     * técnico, no a la empresa.
+     */
+    private UUID executorOf(ServiceRequest request, UUID providerId) {
+        if (providerId == null) {
+            return null;
+        }
+        return contractRepository.findByServiceRequestId(request.getId())
+                .map(ServiceContract::getExecutorId)
+                .orElseGet(() -> applicationRepository
+                        .findByServiceRequestIdAndProviderId(request.getId(), providerId)
+                        .filter(application -> application.getStatus() == ApplicationStatus.SELECTED
+                                && application.getProviderType() == ProviderType.COMPANY)
+                        .map(ServiceRequestApplication::getTechnicianId)
+                        .orElse(providerId));
     }
 
     /** El último paso a {@code CLOSED}; {@code null} si la solicitud es anterior al historial (RD-08): no se inventa. */

@@ -35,8 +35,16 @@ public class CompanyClient {
     record ProfilesQuery(List<UUID> companyAdminUserIds) {
     }
 
-    /** Nombre comercial de la empresa; nunca su NIT ni los datos de la cuenta. */
-    public record CompanyProfile(UUID companyAdminUserId, String name) {
+    /**
+     * Nombre comercial de la empresa; nunca su NIT ni los datos de la cuenta. {@code reputation} (GC-551) es el promedio
+     * simple de las reputaciones de sus técnicos asociados que ya tienen evaluaciones; {@code null} si ninguno tiene o
+     * si ms-users todavía no la envía.
+     */
+    public record CompanyProfile(UUID companyAdminUserId, String name, TechnicianProfileClient.Reputation reputation) {
+
+        public CompanyProfile(UUID companyAdminUserId, String name) {
+            this(companyAdminUserId, name, null);
+        }
     }
 
     record ProfilesAnswer(List<CompanyProfile> profiles) {

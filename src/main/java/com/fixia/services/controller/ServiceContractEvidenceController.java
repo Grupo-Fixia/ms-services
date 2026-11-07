@@ -8,6 +8,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -56,16 +57,20 @@ public class ServiceContractEvidenceController {
     }
 
     @GetMapping
-    public List<EvidenceResponse> list(@AuthenticationPrincipal Jwt jwt,
+    public List<EvidenceResponse> list(@AuthenticationPrincipal Jwt jwt, Authentication authentication,
                                        @PathVariable UUID contractId) {
-        return service.listForProvider(actorId(jwt), contractId);
+        return isCompany(authentication)
+                ? service.listForCompany(actorId(jwt), contractId)
+                : service.listForProvider(actorId(jwt), contractId);
     }
 
     @GetMapping("/{evidenceId}/content")
-    public ResponseEntity<byte[]> download(@AuthenticationPrincipal Jwt jwt,
+    public ResponseEntity<byte[]> download(@AuthenticationPrincipal Jwt jwt, Authentication authentication,
                                                         @PathVariable UUID contractId,
                                                         @PathVariable UUID evidenceId) {
-        EvidenceService.EvidenceContent content = service.downloadForProvider(actorId(jwt), contractId, evidenceId);
+        EvidenceService.EvidenceContent content = isCompany(authentication)
+                ? service.downloadForCompany(actorId(jwt), contractId, evidenceId)
+                : service.downloadForProvider(actorId(jwt), contractId, evidenceId);
         String filename = content.evidence().getId() + extractExtension(content.evidence().getObjectKey());
 
         return ResponseEntity.ok()
@@ -74,6 +79,12 @@ public class ServiceContractEvidenceController {
                 .header("X-Content-Type-Options", "nosniff")
                 .contentLength(content.bytes().length)
                 .body(content.bytes());
+    }
+
+    /** La empresa prestadora (GC-551) consulta y descarga; subir sigue siendo solo del técnico designado. */
+    private static boolean isCompany(Authentication authentication) {
+        return authentication.getAuthorities().stream()
+                .anyMatch(authority -> "ROLE_COMPANY".equals(authority.getAuthority()));
     }
 
     private static String extractExtension(String objectKey) {
