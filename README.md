@@ -516,6 +516,12 @@ El técnico contratado sube fotos o documentos del trabajo; el archivo vive en e
 (S3 compatible) y la base solo guarda los metadatos (`service_evidences`: servicio, contrato, autor, fecha, tipo, tamaño
 y SHA-256). Contrato completo en `docs/openapi.yaml` y `docs/contracts/sprint-5.md` §6.
 
+### Dependencias con ms-users (spike GC-547)
+
+Inventario de las llamadas síncronas entre `ms-users` y `ms-services`, decisión de cuáles pasar a eventos (fase 1: la
+participación con `servicio.cerrado`) y cuáles mantener, riesgos y criterio para implementarlas:
+[docs/spikes/GC-547-desacoplamiento-users-services.md](docs/spikes/GC-547-desacoplamiento-users-services.md).
+
 ### Chat por servicio (GC-527)
 
 Mensajes reales y persistentes entre el cliente y el técnico que ejecuta un servicio contratado (tabla
