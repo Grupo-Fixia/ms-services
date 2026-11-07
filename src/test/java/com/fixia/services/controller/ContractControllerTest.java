@@ -343,7 +343,8 @@ class ContractControllerTest {
         Set<String> keys = Set.copyOf(StreamSupport.stream(
                 java.util.Spliterators.spliteratorUnknownSize(body.fieldNames(), 0), false).toList());
         assertThat(keys).containsExactlyInAnyOrder("id", "serviceRequestId", "quotationId", "clientId", "providerId",
-                "amount", "currency", "scope", "conditions", "agreedAt", "contractedAt", "serviceStatus", "paymentStatus",
+                "executorId", "amount", "currency", "scope", "conditions", "agreedAt", "contractedAt", "serviceStatus",
+                "paymentStatus",
                 "timeline", "serviceRequest");
     }
 
