@@ -104,7 +104,8 @@ public final class BusinessEvents {
     record ReplacedQuotation(UUID quotationId, QuotationStatus newStatus) {
     }
 
-    record QuotationSent(UUID quotationId, UUID serviceRequestId, UUID clientId, UUID providerId, Money price,
+    record QuotationSent(UUID quotationId, UUID serviceRequestId, UUID clientId, UUID providerId, UUID executorId,
+                         Money price,
                          String scope, String conditions, Instant agreedAt, Instant validUntil, Instant sentAt,
                          QuotationStatus status, List<ReplacedQuotation> replacedQuotations, Integer revision) {
     }
@@ -114,15 +115,17 @@ public final class BusinessEvents {
     }
 
     record ServiceContracted(UUID contractId, UUID serviceRequestId, UUID quotationId, UUID clientId, UUID providerId,
-                             Money price, String scope, String conditions, Instant agreedAt, Instant contractedAt,
-                             ServiceRequestStatus status) {
+                             UUID executorId, Money price, String scope, String conditions, Instant agreedAt,
+                             Instant contractedAt, ServiceRequestStatus status) {
     }
 
-    record ServiceStarted(UUID contractId, UUID serviceRequestId, UUID clientId, UUID providerId, Instant startedAt,
+    record ServiceStarted(UUID contractId, UUID serviceRequestId, UUID clientId, UUID providerId, UUID executorId,
+                          Instant startedAt,
                           ServiceRequestStatus status) {
     }
 
-    record ServiceFinished(UUID contractId, UUID serviceRequestId, UUID clientId, UUID providerId, Instant finishedAt,
+    record ServiceFinished(UUID contractId, UUID serviceRequestId, UUID clientId, UUID providerId, UUID executorId,
+                           Instant finishedAt,
                            ServiceRequestStatus status) {
     }
 
@@ -180,7 +183,8 @@ public final class BusinessEvents {
     /** El prestador envió una cotización; {@code replaced} son las enviadas que quedaron reemplazadas o vencidas. */
     public static Event quotationSent(Quotation quotation, UUID clientId, List<Quotation> replaced) {
         return new Event(QUOTATION_SENT, V1, new QuotationSent(quotation.getId(), quotation.getServiceRequestId(),
-                clientId, quotation.getProviderId(), Money.of(quotation.getAmount(), quotation.getCurrency()),
+                clientId, quotation.getProviderId(), quotation.getAuthorId(),
+                Money.of(quotation.getAmount(), quotation.getCurrency()),
                 quotation.getScope(), quotation.getConditions(), quotation.getAgreedAt(), quotation.getValidUntil(),
                 quotation.getCreatedAt(), quotation.getStatus(),
                 replaced.stream().map(previous -> new ReplacedQuotation(previous.getId(), previous.getStatus()))
@@ -200,7 +204,8 @@ public final class BusinessEvents {
     public static Event serviceContracted(ServiceContract contract) {
         return new Event(SERVICE_CONTRACTED, V1, new ServiceContracted(contract.getId(),
                 contract.getServiceRequestId(), contract.getQuotationId(), contract.getClientId(),
-                contract.getProviderId(), Money.of(contract.getAmount(), contract.getCurrency()), contract.getScope(),
+                contract.getProviderId(), contract.getExecutorId(), Money.of(contract.getAmount(), contract.getCurrency()),
+                contract.getScope(),
                 contract.getConditions(), contract.getAgreedAt(), contract.getContractedAt(),
                 ServiceRequestStatus.CONTRACTED));
     }
@@ -208,7 +213,8 @@ public final class BusinessEvents {
     /** El prestador contratado inició el servicio (GC-437): la solicitud pasó de CONTRACTED a IN_PROGRESS. */
     public static Event serviceStarted(ServiceContract contract, Instant startedAt) {
         return new Event(SERVICE_STARTED, V1, new ServiceStarted(contract.getId(), contract.getServiceRequestId(),
-                contract.getClientId(), contract.getProviderId(), startedAt, ServiceRequestStatus.IN_PROGRESS));
+                contract.getClientId(), contract.getProviderId(), contract.getExecutorId(), startedAt,
+                ServiceRequestStatus.IN_PROGRESS));
     }
 
     /**
@@ -217,7 +223,7 @@ public final class BusinessEvents {
      */
     public static Event serviceFinished(ServiceContract contract, Instant finishedAt) {
         return new Event(SERVICE_FINISHED, V1, new ServiceFinished(contract.getId(), contract.getServiceRequestId(),
-                contract.getClientId(), contract.getProviderId(), finishedAt,
+                contract.getClientId(), contract.getProviderId(), contract.getExecutorId(), finishedAt,
                 ServiceRequestStatus.TECHNICIAN_FINISHED));
     }
 

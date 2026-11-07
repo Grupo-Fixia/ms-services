@@ -48,7 +48,17 @@ public class HistoryService {
      */
     @Transactional(readOnly = true)
     public Page page(UUID userId, ActorRole role, int limit, HistoryCursor cursor) {
-        Slice<ServiceContract> contracts = contractsOf(userId, role, limit, cursor);
+        return page(userId, role, false, limit, cursor);
+    }
+
+    /**
+     * Igual que {@link #page(UUID, ActorRole, int, HistoryCursor)}. Con {@code company} (GC-551) el prestador es una
+     * empresa y ve los servicios en que fue la prestadora; sin él, un técnico ve los que ejecutó, propios o de su
+     * empresa.
+     */
+    @Transactional(readOnly = true)
+    public Page page(UUID userId, ActorRole role, boolean company, int limit, HistoryCursor cursor) {
+        Slice<ServiceContract> contracts = contractsOf(userId, role, company, limit, cursor);
         List<UUID> requestIds = contracts.stream().map(ServiceContract::getServiceRequestId).toList();
         Map<UUID, ServiceRequest> requests = serviceRequestRepository.findAllById(requestIds).stream()
                 .collect(Collectors.toMap(ServiceRequest::getId, Function.identity()));
@@ -63,16 +73,22 @@ public class HistoryService {
         return new Page(items, next);
     }
 
-    private Slice<ServiceContract> contractsOf(UUID userId, ActorRole role, int limit, HistoryCursor cursor) {
+    private Slice<ServiceContract> contractsOf(UUID userId, ActorRole role, boolean company, int limit,
+                                               HistoryCursor cursor) {
         PageRequest size = PageRequest.of(0, limit);
         if (role == ActorRole.CLIENT) {
             return cursor == null
                     ? contractRepository.findClientHistoryFrom(userId, size)
                     : contractRepository.findClientHistoryAfter(userId, cursor.contractedAt(), cursor.id(), size);
         }
+        if (company) {
+            return cursor == null
+                    ? contractRepository.findProviderHistoryFrom(userId, size)
+                    : contractRepository.findProviderHistoryAfter(userId, cursor.contractedAt(), cursor.id(), size);
+        }
         return cursor == null
-                ? contractRepository.findProviderHistoryFrom(userId, size)
-                : contractRepository.findProviderHistoryAfter(userId, cursor.contractedAt(), cursor.id(), size);
+                ? contractRepository.findExecutorHistoryFrom(userId, size)
+                : contractRepository.findExecutorHistoryAfter(userId, cursor.contractedAt(), cursor.id(), size);
     }
 
     /** Un servicio de la página con su solicitud y su historial, cargados dentro de la transacción. */

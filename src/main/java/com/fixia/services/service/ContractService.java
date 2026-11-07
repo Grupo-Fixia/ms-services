@@ -80,7 +80,7 @@ public class ContractService {
      */
     @Transactional
     public ContractView start(UUID providerId, UUID contractId) {
-        ServiceContract contract = contractRepository.findByIdAndProviderId(contractId, providerId)
+        ServiceContract contract = contractRepository.findByIdAndExecutorId(contractId, providerId)
                 .orElseThrow(ContractNotFoundException::new);
         ServiceRequest request = serviceRequestRepository.findByIdForUpdate(contract.getServiceRequestId())
                 .orElseThrow(ContractNotFoundException::new);
@@ -108,7 +108,7 @@ public class ContractService {
      */
     @Transactional
     public ContractView finish(UUID providerId, UUID contractId) {
-        ServiceContract contract = contractRepository.findByIdAndProviderId(contractId, providerId)
+        ServiceContract contract = contractRepository.findByIdAndExecutorId(contractId, providerId)
                 .orElseThrow(ContractNotFoundException::new);
         ServiceRequest request = serviceRequestRepository.findByIdForUpdate(contract.getServiceRequestId())
                 .orElseThrow(ContractNotFoundException::new);
@@ -204,7 +204,29 @@ public class ContractService {
     /** Contrataciones del prestador, la más reciente primero. Sin historial: este se pide al consultar una contratación. */
     @Transactional(readOnly = true)
     public List<ContractView> listMine(UUID providerId) {
-        List<ServiceContract> contracts = contractRepository.findByProviderIdOrderByContractedAtDescIdDesc(providerId);
+        return views(contractRepository.findByExecutorIdOrderByContractedAtDescIdDesc(providerId));
+    }
+
+    /**
+     * Contrataciones en que la empresa es la prestadora (GC-551), la más reciente primero. La empresa solo consulta:
+     * iniciar, terminar y subir evidencias es de su técnico designado.
+     */
+    @Transactional(readOnly = true)
+    public List<ContractView> listForCompany(UUID companyAdminUserId) {
+        return views(contractRepository.findByProviderIdOrderByContractedAtDescIdDesc(companyAdminUserId));
+    }
+
+    /** Una contratación de la empresa como prestadora (GC-551); ajena o inexistente, la misma 404. */
+    @Transactional(readOnly = true)
+    public ContractView getForCompany(UUID companyAdminUserId, UUID contractId) {
+        ServiceContract contract = contractRepository.findByIdAndProviderId(contractId, companyAdminUserId)
+                .orElseThrow(ContractNotFoundException::new);
+        ServiceRequest request = serviceRequestRepository.findById(contract.getServiceRequestId())
+                .orElseThrow(ContractNotFoundException::new);
+        return view(contract, request, history.timeline(request.getId()));
+    }
+
+    private List<ContractView> views(List<ServiceContract> contracts) {
         Map<UUID, ServiceRequest> requests = serviceRequestRepository
                 .findAllById(contracts.stream().map(ServiceContract::getServiceRequestId).toList()).stream()
                 .collect(Collectors.toMap(ServiceRequest::getId, Function.identity()));
@@ -220,7 +242,7 @@ public class ContractService {
     /** Una contratación del prestador. Si no existe o es de otro prestador, la respuesta es la misma (404). */
     @Transactional(readOnly = true)
     public ContractView getMine(UUID providerId, UUID contractId) {
-        ServiceContract contract = contractRepository.findByIdAndProviderId(contractId, providerId)
+        ServiceContract contract = contractRepository.findByIdAndExecutorId(contractId, providerId)
                 .orElseThrow(ContractNotFoundException::new);
         ServiceRequest request = serviceRequestRepository.findById(contract.getServiceRequestId())
                 .orElseThrow(ContractNotFoundException::new);

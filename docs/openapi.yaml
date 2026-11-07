@@ -1770,6 +1770,7 @@ components:
             Número de versión dentro de la solicitud (GC-427): 1 es la primera cotización, 2 el primer ajuste. Sirve para
             mostrar «versión 2». Las cotizaciones anteriores a GC-427 se numeraron por antigüedad en la migración.
         providerId: { type: string, format: uuid, description: Identificador del prestador en ms-users. }
+        authorId: { type: string, format: uuid, description: 'GC-551. Quién la redactó: el mismo prestador si es independiente; el técnico designado si el prestador es una empresa.' }
         amount: { type: number, example: 150000.00 }
         currency: { type: string, enum: [COP] }
         scope: { type: string }
@@ -1800,6 +1801,7 @@ components:
         quotationId: { type: string, format: uuid }
         clientId: { type: string, format: uuid, description: Identificador del cliente en ms-users. }
         providerId: { type: string, format: uuid, description: Identificador del prestador en ms-users. }
+        executorId: { type: string, format: uuid, description: 'GC-551. Quién ejecuta el servicio: el mismo prestador si es independiente; el técnico designado si el prestador es una empresa, que es quien recibe el pago.' }
         amount: { type: number, example: 150000.00 }
         currency: { type: string, enum: [COP] }
         scope: { type: string }

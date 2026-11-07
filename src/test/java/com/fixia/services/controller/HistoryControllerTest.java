@@ -364,11 +364,14 @@ class HistoryControllerTest {
                 .andExpect(status().isUnauthorized());
     }
 
+    /** GC-551: la empresa ve solo los servicios en que fue la prestadora; otros roles no tienen historial. */
     @Test
-    void lasEmpresasYOtrosRolesNoTienenHistorial() throws Exception {
+    void unaEmpresaVeSoloLosSuyosYOtrosRolesNoTienenHistorial() throws Exception {
         contracted(CLIENT, PROVIDER);
 
-        history(as(UUID.randomUUID(), "ROLE_COMPANY"), "").andExpect(status().isForbidden());
+        history(as(UUID.randomUUID(), "ROLE_COMPANY"), "")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items").isEmpty());
         history(as(UUID.randomUUID(), "ROLE_ADMIN"), "").andExpect(status().isForbidden());
     }
 }

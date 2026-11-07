@@ -1,5 +1,6 @@
 package com.fixia.services.config;
 
+import org.springframework.http.HttpMethod;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -32,10 +33,14 @@ public class SecurityConfig {
                                 .hasAnyAuthority("ROLE_PROFESSIONAL", "ROLE_COMPANY")
                         .requestMatchers("/api/services/quotations/**").hasAuthority("ROLE_PROFESSIONAL")
                         .requestMatchers("/api/services/contracts/*/evidences/*/content")
-                                .hasAnyAuthority("ROLE_PROFESSIONAL", "ROLE_CLIENT")
+                                .hasAnyAuthority("ROLE_PROFESSIONAL", "ROLE_CLIENT", "ROLE_COMPANY")
+                        // GC-551: la empresa prestadora consulta sus contrataciones y evidencias; iniciar, terminar y
+                        // subir evidencias es solo del técnico designado.
+                        .requestMatchers(HttpMethod.GET, "/api/services/contracts/**")
+                                .hasAnyAuthority("ROLE_PROFESSIONAL", "ROLE_COMPANY")
                         .requestMatchers("/api/services/contracts/**").hasAuthority("ROLE_PROFESSIONAL")
                         .requestMatchers("/api/services/history/**")
-                                .hasAnyAuthority("ROLE_CLIENT", "ROLE_PROFESSIONAL")
+                                .hasAnyAuthority("ROLE_CLIENT", "ROLE_PROFESSIONAL", "ROLE_COMPANY")
                         .anyRequest().authenticated())
                 .oauth2ResourceServer(oauth2 -> oauth2
                         .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter()))
