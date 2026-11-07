@@ -72,7 +72,7 @@ public class EvidenceService {
      */
     @Transactional
     public UploadResult upload(UUID providerId, UUID contractId, String contentType, byte[] content) {
-        ServiceContract contract = contractRepository.findByIdAndProviderId(contractId, providerId)
+        ServiceContract contract = contractRepository.findByIdAndExecutorId(contractId, providerId)
                 .orElseThrow(ContractNotFoundException::new);
 
         ServiceRequest request = serviceRequestRepository.findByIdForUpdate(contract.getServiceRequestId())
@@ -147,12 +147,32 @@ public class EvidenceService {
      */
     @Transactional(readOnly = true)
     public List<EvidenceResponse> listForProvider(UUID providerId, UUID contractId) {
-        contractRepository.findByIdAndProviderId(contractId, providerId)
+        contractRepository.findByIdAndExecutorId(contractId, providerId)
                 .orElseThrow(ContractNotFoundException::new);
 
         return evidenceRepository.findByContractIdOrderByCreatedAtAsc(contractId).stream()
                 .map(EvidenceResponse::from)
                 .toList();
+    }
+
+    /** Lista evidencias para la empresa prestadora del contrato (GC-551): solo consulta. */
+    @Transactional(readOnly = true)
+    public List<EvidenceResponse> listForCompany(UUID companyAdminUserId, UUID contractId) {
+        contractRepository.findByIdAndProviderId(contractId, companyAdminUserId)
+                .orElseThrow(ContractNotFoundException::new);
+        return evidenceRepository.findByContractIdOrderByCreatedAtAsc(contractId).stream()
+                .map(EvidenceResponse::from)
+                .toList();
+    }
+
+    /** Descarga una evidencia para la empresa prestadora del contrato (GC-551). */
+    @Transactional(readOnly = true)
+    public EvidenceContent downloadForCompany(UUID companyAdminUserId, UUID contractId, UUID evidenceId) {
+        contractRepository.findByIdAndProviderId(contractId, companyAdminUserId)
+                .orElseThrow(ContractNotFoundException::new);
+        ServiceEvidence evidence = evidenceRepository.findByIdAndContractId(evidenceId, contractId)
+                .orElseThrow(EvidenceNotFoundException::new);
+        return verified(evidence);
     }
 
     /**
@@ -174,7 +194,7 @@ public class EvidenceService {
      */
     @Transactional(readOnly = true)
     public EvidenceContent downloadForProvider(UUID providerId, UUID contractId, UUID evidenceId) {
-        contractRepository.findByIdAndProviderId(contractId, providerId)
+        contractRepository.findByIdAndExecutorId(contractId, providerId)
                 .orElseThrow(ContractNotFoundException::new);
 
         ServiceEvidence evidence = evidenceRepository.findByIdAndContractId(evidenceId, contractId)
