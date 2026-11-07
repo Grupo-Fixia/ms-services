@@ -516,6 +516,17 @@ El técnico contratado sube fotos o documentos del trabajo; el archivo vive en e
 (S3 compatible) y la base solo guarda los metadatos (`service_evidences`: servicio, contrato, autor, fecha, tipo, tamaño
 y SHA-256). Contrato completo en `docs/openapi.yaml` y `docs/contracts/sprint-5.md` §6.
 
+### Chat por servicio (GC-527)
+
+Mensajes reales y persistentes entre el cliente y el técnico que ejecuta un servicio contratado (tabla
+`service_messages`, migración V18). El técnico entra por `/api/services/contracts/{id}/messages` y el cliente por
+`/api/services/requests/{id}/messages`; la empresa no participa. Se escribe mientras el servicio está contratado, en
+curso o finalizado por el técnico; cerrado, solo se lee. La app pregunta por lo nuevo con
+`?after=<nextCursor>&wait=25` (long polling: sin novedades, la petición espera hasta 25 s y responde apenas llega un
+mensaje). Vive en
+`ms-services` y no en un microservicio de Mensajería con MongoDB: decisión y documentos por corregir en
+[docs/contracts/mensajeria.md](docs/contracts/mensajeria.md).
+
 | Operación | Ruta | Quién |
 |---|---|---|
 | Subir (`multipart`, campo `file`) | `POST /api/services/contracts/{contractId}/evidences` | técnico contratado |
