@@ -273,14 +273,20 @@ class EvidenceRulesTest {
         assertThat(evidenceRepository.countByContractId(service.contractId())).isEqualTo(1);
     }
 
+    /**
+     * GC-551: una empresa consulta las evidencias de los contratos en que es la prestadora, pero nunca sube, y las de un
+     * contrato ajeno no existen para ella (404, igual que para un técnico ajeno).
+     */
     @Test
-    void laEmpresaNoTieneAccesoALasEvidencias() throws Exception {
+    void unaEmpresaAjenaNoVeLasEvidenciasYNingunaEmpresaSube() throws Exception {
         Service service = inProgress();
         String id = uploadOk(service, jpeg(1));
 
         mockMvc.perform(multipart(contractPath(service)).file(new MockMultipartFile("file", "a.jpg", "image/jpeg",
                 jpeg(2))).with(company(COMPANY))).andExpect(status().isForbidden());
-        mockMvc.perform(get(contractPath(service)).with(company(COMPANY))).andExpect(status().isForbidden());
+        mockMvc.perform(get(contractPath(service)).with(company(COMPANY))).andExpect(status().isNotFound());
+        mockMvc.perform(get(contractPath(service) + "/" + id + "/content").with(company(COMPANY)))
+                .andExpect(status().isNotFound());
         mockMvc.perform(get(requestPath(service)).with(company(COMPANY))).andExpect(status().isForbidden());
         mockMvc.perform(get(requestPath(service) + "/" + id + "/content").with(company(COMPANY)))
                 .andExpect(status().isForbidden());

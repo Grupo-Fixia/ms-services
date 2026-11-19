@@ -35,12 +35,15 @@ public class QuotationService {
     private final ServiceRequestHistory history;
     private final BusinessEventRecorder events;
     private final ProviderScheduleGuard scheduleGuard;
+    private final CompanyDesignation companyDesignation;
     private final Clock clock;
 
     public QuotationService(ServiceRequestRepository serviceRequestRepository,
                             QuotationRepository quotationRepository, ContractService contractService,
                             ServiceRequestHistory history, BusinessEventRecorder events,
-                            ProviderScheduleGuard scheduleGuard, Clock clock) {
+                            ProviderScheduleGuard scheduleGuard, CompanyDesignation companyDesignation,
+                            Clock clock) {
+        this.companyDesignation = companyDesignation;
         this.serviceRequestRepository = serviceRequestRepository;
         this.quotationRepository = quotationRepository;
         this.contractService = contractService;
@@ -69,9 +72,12 @@ public class QuotationService {
      * </ol>
      */
     @Transactional
-    public Quotation send(UUID providerId, CreateQuotationRequest body) {
+    public Quotation send(UUID technicianId, CreateQuotationRequest body) {
         ServiceRequest request = serviceRequestRepository.findByIdForUpdate(body.serviceRequestId())
                 .orElseThrow(ServiceRequestNotFoundException::new);
+        // GC-551: si la seleccionada es una empresa, su técnico designado cotiza en nombre de ella. Se resuelve con la
+        // solicitud ya bloqueada (leerla antes dejaría una copia vieja en la sesión y rompería los envíos simultáneos).
+        UUID providerId = companyDesignation.providerFor(request, technicianId);
         if (request.getStatus() != ServiceRequestStatus.PROVIDER_SELECTED
                 || !providerId.equals(request.getSelectedProviderId())) {
             throw new QuotationNotAllowedException("No tienes una selección vigente en esta solicitud");
@@ -86,13 +92,14 @@ public class QuotationService {
         int revision = quotationRepository.maxRevision(request.getId()) + 1;
         Quotation quotation;
         try {
-            quotation = Quotation.send(request, providerId, body.amount(), body.currency(), body.scope(),
-                    body.conditions(), body.agreedAt(), body.validUntil(), revision, now);
+            quotation = Quotation.send(request, providerId, technicianId, body.amount(), body.currency(),
+                    body.scope(), body.conditions(), body.agreedAt(), body.validUntil(), revision, now);
         } catch (IllegalArgumentException e) {
             // Reglas del dominio que la validación del cuerpo no cubre (fechas frente al reloj del servicio).
             throw new InvalidQuotationException(e.getMessage(), e);
         }
-        scheduleGuard.ensureAvailable(providerId, quotation.getAgreedAt(), request.getId());
+        // El horario es del técnico que ejecuta, no de la empresa (GC-551).
+        scheduleGuard.ensureAvailable(technicianId, quotation.getAgreedAt(), request.getId());
 
         List<Quotation> replaced = quotationRepository.findByServiceRequestIdAndStatus(request.getId(),
                 QuotationStatus.SENT);
@@ -105,7 +112,7 @@ public class QuotationService {
         }
         Quotation saved = quotationRepository.save(quotation);
         events.record(BusinessEvents.quotationSent(saved, request.getClientId(), replaced), request.getId(),
-                BusinessEvents.Actor.professional(providerId), saved.getCreatedAt());
+                BusinessEvents.Actor.professional(technicianId), saved.getCreatedAt());
         return saved;
     }
 
@@ -113,15 +120,15 @@ public class QuotationService {
     @Transactional(readOnly = true)
     public List<Quotation> listMine(UUID providerId, UUID serviceRequestId) {
         return serviceRequestId == null
-                ? quotationRepository.findByProviderIdOrderByCreatedAtDescIdDesc(providerId)
-                : quotationRepository.findByProviderIdAndServiceRequestIdOrderByRevisionDesc(providerId,
+                ? quotationRepository.findByAuthorIdOrderByCreatedAtDescIdDesc(providerId)
+                : quotationRepository.findByAuthorIdAndServiceRequestIdOrderByRevisionDesc(providerId,
                 serviceRequestId);
     }
 
     /** Una cotización del prestador. Si no existe o es de otro prestador, la respuesta es la misma (404). */
     @Transactional(readOnly = true)
     public Quotation getMine(UUID providerId, UUID quotationId) {
-        return quotationRepository.findByIdAndProviderId(quotationId, providerId)
+        return quotationRepository.findByIdAndAuthorId(quotationId, providerId)
                 .orElseThrow(QuotationNotFoundException::new);
     }
 
@@ -199,7 +206,12 @@ public class QuotationService {
                     QuotationStatus.ACCEPTED).isPresent()) {
                 throw new QuotationNotAllowedException("La solicitud ya tiene una cotización aceptada");
             }
-            scheduleGuard.ensureAvailable(quotation.getProviderId(), quotation.getAgreedAt(), request.getId());
+            // El horario es del técnico que ejecuta (GC-551), no de la empresa prestadora.
+            scheduleGuard.ensureAvailable(quotation.getAuthorId(), quotation.getAgreedAt(), request.getId());
+            if (!quotation.getAuthorId().equals(quotation.getProviderId())) {
+                // GC-551: cotización de una empresa; su técnico debe seguir en ella al contratar (409 si se fue).
+                companyDesignation.requireStillAssociated(quotation.getProviderId(), quotation.getAuthorId());
+            }
             quotation.accept(now);
             contract(request, quotation, now);
         } else {

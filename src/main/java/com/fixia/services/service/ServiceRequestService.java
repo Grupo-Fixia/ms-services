@@ -1,5 +1,8 @@
 package com.fixia.services.service;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import com.fixia.services.domain.ProviderType;
+import com.fixia.services.client.CompanyClient;
 import com.fixia.services.domain.ActorRole;
 import com.fixia.services.domain.ApplicationStatus;
 import com.fixia.services.domain.ApproximateLocation;
@@ -31,10 +34,24 @@ public class ServiceRequestService {
     private final ServiceRequestHistory history;
     private final BusinessEventRecorder events;
     private final Clock clock;
+    private final CompanyClient companyClient;
 
     public ServiceRequestService(ServiceRequestRepository repository,
                                  ServiceRequestApplicationRepository applicationRepository,
                                  ServiceRequestHistory history, BusinessEventRecorder events, Clock clock) {
+        this(repository, applicationRepository, history, events, clock, null);
+    }
+
+    /**
+     * @param companyClient para volver a comprobar, al seleccionar una empresa, que su técnico propuesto siga en ella
+     *                      (GC-551); sin él (pruebas unitarias) no se comprueba
+     */
+    @Autowired
+    public ServiceRequestService(ServiceRequestRepository repository,
+                                 ServiceRequestApplicationRepository applicationRepository,
+                                 ServiceRequestHistory history, BusinessEventRecorder events, Clock clock,
+                                 CompanyClient companyClient) {
+        this.companyClient = companyClient;
         this.repository = repository;
         this.applicationRepository = applicationRepository;
         this.history = history;
@@ -132,6 +149,11 @@ public class ServiceRequestService {
                 .findFirst()
                 .orElseThrow(ApplicationNotFoundException::new);
 
+        if (companyClient != null && chosen.getProviderType() == ProviderType.COMPANY
+                && !companyClient.isTechnicianAssociated(chosen.getProviderId(), chosen.getTechnicianId())) {
+            // GC-551: el técnico se desvinculó después de la postulación; no se selecciona una oferta sin ejecutor.
+            throw new ServiceRequestNotAvailableException(CompanyDesignation.LEFT_COMPANY);
+        }
         List<ServiceRequestApplication> rejected = applications.stream()
                 .filter(application -> application != chosen).toList();
         chosen.select(now);

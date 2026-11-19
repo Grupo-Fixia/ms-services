@@ -34,8 +34,8 @@ public record ApplicantResponse(
     /**
      * Perfil público del prestador que entrega ms-users (GC-425): solo lo necesario para comparar, sin datos de
      * contacto ni ubicación. {@code null} si ms-users ya no lo reconoce como técnico activo. {@code reputation}
-     * (GC-446) es la que calcula ms-users de las evaluaciones reales, o {@code null} si el técnico aún no tiene; una
-     * empresa no tiene reputación propia en este sprint (no se evalúan servicios de empresa).
+     * (GC-446) es la que calcula ms-users de las evaluaciones reales, o {@code null} si el técnico aún no tiene. La de una
+     * empresa (GC-551) es el promedio simple de las de sus técnicos actuales.
      */
     public record ProviderProfile(String displayName, String verificationStatus, List<ServiceCategory> categories,
                                   String professionalDescription, Integer yearsOfExperience, String city,
@@ -46,7 +46,7 @@ public record ApplicantResponse(
             if (profile == null) {
                 return null;
             }
-            return new ProviderProfile(profile.name(), null, List.of(), null, null, null, null);
+            return new ProviderProfile(profile.name(), null, List.of(), null, null, null, profile.reputation());
         }
 
         static ProviderProfile from(TechnicianProfileClient.PublicProfile profile) {

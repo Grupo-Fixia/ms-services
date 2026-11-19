@@ -65,6 +65,13 @@ public class ServiceContract {
     @Column(name = "contracted_at", nullable = false, updatable = false)
     private Instant contractedAt;
 
+    /**
+     * Quién ejecuta el servicio (GC-551): el autor de la cotización aceptada. En un técnico independiente coincide con
+     * {@link #providerId}; en una empresa es su técnico designado, mientras la empresa es la prestadora y recibe el pago.
+     */
+    @Column(name = "executor_id", nullable = false, updatable = false)
+    private UUID executorId;
+
     protected ServiceContract() {
     }
 
@@ -79,6 +86,7 @@ public class ServiceContract {
         this.conditions = quotation.getConditions();
         this.agreedAt = quotation.getAgreedAt();
         this.contractedAt = now;
+        this.executorId = quotation.getAuthorId();
     }
 
     /**
@@ -123,6 +131,10 @@ public class ServiceContract {
 
     public UUID getClientId() {
         return clientId;
+    }
+
+    public UUID getExecutorId() {
+        return executorId;
     }
 
     public UUID getProviderId() {

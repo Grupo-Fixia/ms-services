@@ -24,14 +24,25 @@ public interface ServiceContractRepository extends JpaRepository<ServiceContract
     List<ServiceContract> findByProviderIdOrderByContractedAtDescIdDesc(UUID providerId);
 
     /**
-     * Contrataciones del prestador cuya solicitud sigue en alguno de {@code statuses} y cuya fecha acordada cae
-     * estrictamente entre {@code from} y {@code to}, sin contar la solicitud {@code excludedRequestId}. La usa
-     * {@code ProviderScheduleGuard} para no contratar dos servicios del mismo prestador a la misma hora.
+     * Contrataciones que ejecuta el técnico (GC-551), la más reciente primero: las suyas como independiente y las de
+     * una empresa que lo designó.
+     */
+    List<ServiceContract> findByExecutorIdOrderByContractedAtDescIdDesc(UUID executorId);
+
+    /** Una contratación que ejecuta el técnico; si la ejecuta otro, no se encuentra (GC-551). */
+    Optional<ServiceContract> findByIdAndExecutorId(UUID id, UUID executorId);
+
+    /**
+     * Contrataciones que ejecuta el técnico cuya solicitud sigue en alguno de {@code statuses} y cuya fecha acordada
+     * cae estrictamente entre {@code from} y {@code to}, sin contar la solicitud {@code excludedRequestId}. La usa
+     * {@code ProviderScheduleGuard} para no contratar dos servicios del mismo técnico a la misma hora. Desde GC-551 se
+     * mira al ejecutor, no al prestador: una empresa puede tener varios servicios a la misma hora con técnicos
+     * distintos, y un técnico no puede estar en dos a la vez aunque uno sea suyo y otro de su empresa.
      */
     @Query("""
             select c from ServiceContract c, ServiceRequest r
             where r.id = c.serviceRequestId
-              and c.providerId = :providerId
+              and c.executorId = :providerId
               and r.status in :statuses
               and c.agreedAt > :from and c.agreedAt < :to
               and c.serviceRequestId <> :excludedRequestId
@@ -51,6 +62,29 @@ public interface ServiceContractRepository extends JpaRepository<ServiceContract
 
     /** Una contratación del prestador; si es de otro, no se encuentra. */
     Optional<ServiceContract> findByIdAndProviderId(UUID id, UUID providerId);
+
+    /**
+     * Historial del técnico como ejecutor (GC-551), igual que {@link #findProviderHistoryFrom} pero por
+     * {@code executorId}: incluye los servicios que hizo para una empresa.
+     */
+    @Query("""
+            select c from ServiceContract c
+            where c.executorId = :executorId
+            order by c.contractedAt desc, c.id desc
+            """)
+    Slice<ServiceContract> findExecutorHistoryFrom(@Param("executorId") UUID executorId, Pageable pageable);
+
+    /** Las contrataciones que ejecutó el técnico estrictamente posteriores en el orden a la clave del cursor. */
+    @Query("""
+            select c from ServiceContract c
+            where c.executorId = :executorId
+              and (c.contractedAt < :cursorContractedAt
+                   or (c.contractedAt = :cursorContractedAt and c.id < :cursorId))
+            order by c.contractedAt desc, c.id desc
+            """)
+    Slice<ServiceContract> findExecutorHistoryAfter(@Param("executorId") UUID executorId,
+                                                    @Param("cursorContractedAt") Instant cursorContractedAt,
+                                                    @Param("cursorId") UUID cursorId, Pageable pageable);
 
     /**
      * Historial del prestador (GC-448): sus contrataciones, la más reciente primero (empates por {@code id}). Es la

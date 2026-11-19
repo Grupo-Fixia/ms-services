@@ -20,6 +20,7 @@ public record ParticipationResponse(
         UUID clientId,
         UUID providerId,
         ProviderType providerType,
-        Instant closedAt
+        Instant closedAt,
+        UUID executorId
 ) {
 }

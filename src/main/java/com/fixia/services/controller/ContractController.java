@@ -3,6 +3,7 @@ package com.fixia.services.controller;
 import com.fixia.services.dto.ContractResponse;
 import com.fixia.services.service.ContractService;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -33,15 +34,21 @@ public class ContractController {
     }
 
     @GetMapping
-    public List<ContractResponse> list(@AuthenticationPrincipal Jwt jwt) {
-        return service.listMine(providerId(jwt)).stream()
+    public List<ContractResponse> list(@AuthenticationPrincipal Jwt jwt, Authentication authentication) {
+        List<ContractService.ContractView> views = isCompany(authentication)
+                ? service.listForCompany(providerId(jwt))
+                : service.listMine(providerId(jwt));
+        return views.stream()
                 .map(view -> ContractResponse.from(view.contract(), view.request(), view.timeline(), view.paymentStatus()))
                 .toList();
     }
 
     @GetMapping("/{contractId}")
-    public ContractResponse get(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID contractId) {
-        ContractService.ContractView view = service.getMine(providerId(jwt), contractId);
+    public ContractResponse get(@AuthenticationPrincipal Jwt jwt, Authentication authentication,
+                                @PathVariable UUID contractId) {
+        ContractService.ContractView view = isCompany(authentication)
+                ? service.getForCompany(providerId(jwt), contractId)
+                : service.getMine(providerId(jwt), contractId);
         return ContractResponse.from(view.contract(), view.request(), view.timeline(), view.paymentStatus());
     }
 
@@ -65,6 +72,15 @@ public class ContractController {
     public ContractResponse finish(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID contractId) {
         ContractService.ContractView view = service.finish(providerId(jwt), contractId);
         return ContractResponse.from(view.contract(), view.request(), view.timeline(), view.paymentStatus());
+    }
+
+    /**
+     * La empresa (GC-551) consulta las contrataciones en que es la prestadora; el técnico, las que ejecuta. Iniciar y
+     * terminar siguen siendo solo del técnico (SecurityConfig).
+     */
+    private static boolean isCompany(Authentication authentication) {
+        return authentication.getAuthorities().stream()
+                .anyMatch(authority -> "ROLE_COMPANY".equals(authority.getAuthority()));
     }
 
     /**

@@ -15,6 +15,8 @@ import java.util.UUID;
  *                   para mostrar «versión 2» sin calcularla
  * @param statusName nombre del estado en español, para mostrar ({@code status} es el código que se compara)
  * @param expired    la cotización sigue {@code SENT} pero su vigencia ya pasó: no se puede aceptar (RF-033)
+ * @param authorId   quién la redactó (GC-551): el mismo prestador si es independiente, o el técnico designado si el
+ *                   prestador es una empresa
  * @param current    es la versión vigente: sigue {@code SENT} y no ha vencido, es decir, la que el cliente aún puede
  *                   aceptar o rechazar. Una aceptada, rechazada, reemplazada o vencida no es vigente
  */
@@ -23,6 +25,7 @@ public record QuotationResponse(
         UUID serviceRequestId,
         int revision,
         UUID providerId,
+        UUID authorId,
         BigDecimal amount,
         CurrencyCode currency,
         String scope,
@@ -45,6 +48,7 @@ public record QuotationResponse(
                 quotation.getServiceRequestId(),
                 quotation.getRevision(),
                 quotation.getProviderId(),
+                quotation.getAuthorId(),
                 quotation.getAmount(),
                 quotation.getCurrency(),
                 quotation.getScope(),

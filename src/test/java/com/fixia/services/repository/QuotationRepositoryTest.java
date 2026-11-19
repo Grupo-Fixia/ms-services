@@ -203,10 +203,10 @@ class QuotationRepositoryTest {
         assertThatThrownBy(() -> insert(request, "100", "COP", "ACCEPTED", null))
                 .isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> jdbcTemplate.update("INSERT INTO quotations (id, service_request_id, provider_id, "
-                        + "amount, currency, scope, conditions, agreed_at, valid_until, status, created_at, updated_at, "
-                        + "version, revision) VALUES (?, ?, ?, 100, 'COP', 'a', 'b', ?, ?, 'SENT', ?, ?, 0, "
-                        + (++revisionSeq) + ")",
-                UUID.randomUUID(), request, PROVIDER, ts(now()), ts(now().plusSeconds(60)), ts(now()), ts(now())))
+                        + "author_id, amount, currency, scope, conditions, agreed_at, valid_until, status, created_at, "
+                        + "updated_at, version, revision) VALUES (?, ?, ?, ?, 100, 'COP', 'a', 'b', ?, ?, 'SENT', ?, ?, "
+                        + "0, " + (++revisionSeq) + ")",
+                UUID.randomUUID(), request, PROVIDER, PROVIDER, ts(now()), ts(now().plusSeconds(60)), ts(now()), ts(now())))
                 .isInstanceOf(DataIntegrityViolationException.class);
         assertThat(insert(request, "100", "COP", "ACCEPTED", ts(now()))).isEqualTo(1);
     }
@@ -215,15 +215,15 @@ class QuotationRepositoryTest {
     private int revisionSeq = 0;
 
     private int insert(UUID request, String amount, String currency, String status, java.sql.Timestamp respondedAt) {
-        return jdbcTemplate.update(insertSql(), UUID.randomUUID(), request, PROVIDER, amount, currency, status,
-                respondedAt);
+        return jdbcTemplate.update(insertSql(), UUID.randomUUID(), request, PROVIDER, PROVIDER, amount, currency,
+                status, respondedAt);
     }
 
     private String insertSql() {
         Instant now = now();
-        return "INSERT INTO quotations (id, service_request_id, provider_id, amount, currency, scope, conditions, "
-                + "agreed_at, valid_until, status, responded_at, created_at, updated_at, version, revision) "
-                + "VALUES (?, ?, ?, CAST(? AS NUMERIC(12, 2)), ?, 'a', 'b', TIMESTAMP WITH TIME ZONE '"
+        return "INSERT INTO quotations (id, service_request_id, provider_id, author_id, amount, currency, scope, "
+                + "conditions, agreed_at, valid_until, status, responded_at, created_at, updated_at, version, revision) "
+                + "VALUES (?, ?, ?, ?, CAST(? AS NUMERIC(12, 2)), ?, 'a', 'b', TIMESTAMP WITH TIME ZONE '"
                 + now.plus(Duration.ofDays(3)) + "', TIMESTAMP WITH TIME ZONE '" + now.plus(Duration.ofDays(1))
                 + "', ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0, " + (++revisionSeq) + ")";
     }

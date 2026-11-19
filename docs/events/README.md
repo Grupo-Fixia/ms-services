@@ -173,7 +173,10 @@ escribe el contenido del evento en los logs (solo `eventId`, `eventType` y la se
   que no conocen (lector tolerante) y el esquema se actualiza en el mismo PR. Ejemplo real próximo: la postulación
   empresarial (GC-468) agregará a `postulacion.registrada` los campos opcionales `providerType` (`INDEPENDENT` o
   `COMPANY`) y `technicianId`; sigue siendo la versión 1. Ya hecho así: `budget` en `solicitud.publicada` (GC-421) y
-  `revision` en `cotizacion.enviada` (GC-427).
+  `revision` en `cotizacion.enviada` (GC-427), y `executorId` en `cotizacion.enviada`, `servicio.contratado`,
+  `servicio.iniciado` y `servicio.finalizado` (GC-551: el técnico que ejecuta; en un servicio de empresa, `providerId`
+  es la empresa y `executorId` su técnico designado). **El lakehouse debe copiar estos esquemas**: con su copia anterior
+  (`additionalProperties: false`) mandaría esos eventos a `quarantine/`.
 - **Cambio incompatible, versión nueva:** quitar o renombrar un campo, cambiar su tipo o su significado, o volver
   obligatorio uno opcional. Se crea `<tipo>.v2.schema.json`, `ms-services` publica la versión nueva y el consumidor
   debe aceptar la versión nueva y la anterior durante la transición. Ejemplo: si `proposedPrice` dejara de ser un

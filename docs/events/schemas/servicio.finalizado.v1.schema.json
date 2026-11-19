@@ -46,6 +46,10 @@
         "providerId": {
           "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
         },
+        "executorId": {
+          "description": "Técnico que ejecuta el servicio (GC-551). Coincide con providerId en un independiente; en una empresa es su técnico designado. Opcional en v1.",
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
+        },
         "finishedAt": {
           "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/instant"
         },

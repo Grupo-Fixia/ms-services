@@ -54,6 +54,10 @@
         "providerId": {
           "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
         },
+        "executorId": {
+          "description": "Técnico que ejecutará el servicio (GC-551): el autor de la cotización aceptada. Coincide con providerId en un independiente; en una empresa es su técnico designado y providerId es la empresa, que recibe el pago. Opcional en v1.",
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
+        },
         "price": {
           "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/money"
         },
