@@ -50,7 +50,9 @@ public class HistoryController {
                                     @RequestParam(required = false) String cursor) {
         UUID userId = userId(jwt);
         ActorRole role = roleOf(authentication);
-        HistoryService.Page page = service.page(userId, role, parseLimit(limit), parseCursor(cursor));
+        boolean company = authentication.getAuthorities().stream()
+                .anyMatch(authority -> "ROLE_COMPANY".equals(authority.getAuthority()));
+        HistoryService.Page page = service.page(userId, role, company, parseLimit(limit), parseCursor(cursor));
         return new HistoryPageResponse(
                 page.items().stream()
                         .map(item -> HistoryItemResponse.from(item.contract(), item.request(), item.role(),

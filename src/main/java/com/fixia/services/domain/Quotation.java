@@ -72,6 +72,13 @@ public class Quotation {
     @Column(name = "revision", nullable = false, updatable = false)
     private int revision;
 
+    /**
+     * Quién la redactó y la envió (GC-551). En un técnico independiente es el mismo prestador; en una empresa es el
+     * técnico designado en la postulación, mientras {@link #providerId} sigue siendo la empresa.
+     */
+    @Column(name = "author_id", nullable = false, updatable = false)
+    private UUID authorId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", nullable = false, length = 20)
     private QuotationStatus status;
@@ -93,12 +100,13 @@ public class Quotation {
     protected Quotation() {
     }
 
-    private Quotation(ServiceRequest request, UUID providerId, BigDecimal amount, CurrencyCode currency,
-                      String scope, String conditions, Instant agreedAt, Instant validUntil, int revision,
-                      Instant now) {
+    private Quotation(ServiceRequest request, UUID providerId, UUID authorId, BigDecimal amount,
+                      CurrencyCode currency, String scope, String conditions, Instant agreedAt, Instant validUntil,
+                      int revision, Instant now) {
         this.serviceRequestId = request.getId();
         this.revision = revision;
         this.providerId = providerId;
+        this.authorId = authorId;
         this.amount = amount.setScale(AMOUNT_SCALE);
         this.currency = currency;
         this.scope = scope.strip();
@@ -125,8 +133,21 @@ public class Quotation {
     public static Quotation send(ServiceRequest request, UUID providerId, BigDecimal amount, CurrencyCode currency,
                                  String scope, String conditions, Instant agreedAt, Instant validUntil, int revision,
                                  Instant now) {
+        return send(request, providerId, providerId, amount, currency, scope, conditions, agreedAt, validUntil,
+                revision, now);
+    }
+
+    /**
+     * Igual que {@link #send(ServiceRequest, UUID, BigDecimal, CurrencyCode, String, String, Instant, Instant, int,
+     * Instant)}, pero con autor distinto del prestador (GC-551): la empresa seleccionada es el prestador y su técnico
+     * designado es quien cotiza. Que el autor sea de verdad el designado lo comprueba el servicio.
+     */
+    public static Quotation send(ServiceRequest request, UUID providerId, UUID authorId, BigDecimal amount,
+                                 CurrencyCode currency, String scope, String conditions, Instant agreedAt,
+                                 Instant validUntil, int revision, Instant now) {
         require(request != null && request.getId() != null, "La solicitud es obligatoria");
         require(providerId != null, "El prestador es obligatorio");
+        require(authorId != null, "Quien cotiza es obligatorio");
         require(request.getStatus() == ServiceRequestStatus.PROVIDER_SELECTED,
                 "Solo se puede cotizar una solicitud con prestador seleccionado");
         require(providerId.equals(request.getSelectedProviderId()),
@@ -144,8 +165,8 @@ public class Quotation {
         require(validUntil.isAfter(now), "La vigencia debe ser posterior al envío");
         require(!validUntil.isAfter(agreedAt), "La vigencia no puede ser posterior a la fecha acordada");
         require(revision >= 1, "La versión de la cotización debe ser mayor que cero");
-        return new Quotation(request, providerId, amount, currency, scope, conditions, agreedAt, validUntil, revision,
-                now);
+        return new Quotation(request, providerId, authorId, amount, currency, scope, conditions, agreedAt, validUntil,
+                revision, now);
     }
 
     /** Si la cotización sigue esperando respuesta pero ya pasó su vigencia. */
@@ -209,6 +230,10 @@ public class Quotation {
 
     public UUID getId() {
         return id;
+    }
+
+    public UUID getAuthorId() {
+        return authorId;
     }
 
     public UUID getServiceRequestId() {

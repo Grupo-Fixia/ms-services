@@ -34,4 +34,4 @@ jobs:
           envsubst '${IMAGE}' < deploy/ms-services.yaml | kubectl apply -f -
 
       - name: Wait for rollout
-        run: kubectl -n apps rollout status deployment/ms-services --timeout=240s
+        run: kubectl -n apps rollout status deployment/ms-services --timeout=420s

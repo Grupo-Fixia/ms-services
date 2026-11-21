@@ -491,8 +491,12 @@ class CompanyApplicationControllerTest {
 
     // ---------- Después de seleccionar y por rol ----------
 
+    /**
+     * GC-551 reemplaza el paso 9 de GC-468: el técnico designado cotiza en nombre de la empresa; la empresa no cotiza
+     * (403) y otro técnico de la misma empresa tampoco (409).
+     */
     @Test
-    void despuesDeSeleccionarLaEmpresaNoSeCotizaNiPorLaEmpresaNiPorSuTecnico() throws Exception {
+    void despuesDeSeleccionarLaEmpresaCotizaSuTecnicoDesignadoYNoLaEmpresa() throws Exception {
         ServiceRequest request = publishedRequest();
         UUID company = idOf(applyAsCompany(COMPANY, request.getId(), CARLOS, 180000)
                 .andExpect(status().isCreated()));
@@ -511,12 +515,19 @@ class CompanyApplicationControllerTest {
 
         mockMvc.perform(post("/api/services/quotations").with(as(COMPANY, "ROLE_COMPANY"))
                 .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/services/quotations").with(as(ANA, "ROLE_PROFESSIONAL"))
+                .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.detail").value("No eres el técnico designado de esta solicitud"));
         mockMvc.perform(post("/api/services/quotations").with(as(CARLOS, "ROLE_PROFESSIONAL"))
-                .contentType(MediaType.APPLICATION_JSON).content(body)).andExpect(status().isConflict());
+                .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.providerId").value(COMPANY.toString()))
+                .andExpect(jsonPath("$.authorId").value(CARLOS.toString()));
     }
 
     @Test
-    void elClienteNoSePostulaNiVeOportunidadesYLaEmpresaNoUsaRutasDelClienteNiDelContrato() throws Exception {
+    void elClienteNoSePostulaNiVeOportunidadesYLaEmpresaNoUsaRutasDelClienteNiEjecuta() throws Exception {
         ServiceRequest request = publishedRequest();
 
         apply(CLIENT, "ROLE_CLIENT", request.getId(), null, 150000).andExpect(status().isForbidden());
@@ -524,8 +535,11 @@ class CompanyApplicationControllerTest {
                 .andExpect(status().isForbidden());
         mockMvc.perform(get("/api/services/requests").with(as(COMPANY, "ROLE_COMPANY")))
                 .andExpect(status().isForbidden());
+        // GC-551: la empresa consulta sus contrataciones (lista vacía aquí), pero no inicia ni termina servicios.
         mockMvc.perform(get("/api/services/contracts").with(as(COMPANY, "ROLE_COMPANY")))
-                .andExpect(status().isForbidden());
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/services/contracts/" + UUID.randomUUID() + "/start")
+                .with(as(COMPANY, "ROLE_COMPANY"))).andExpect(status().isForbidden());
     }
 
     // ---------- Base de datos ----------

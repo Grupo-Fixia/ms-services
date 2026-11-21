@@ -3,6 +3,7 @@ package com.fixia.services.controller;
 import com.fixia.services.domain.ServiceRequest;
 import com.fixia.services.dto.ApplicantResponse;
 import com.fixia.services.dto.CreateServiceRequestRequest;
+import com.fixia.services.dto.ExactLocationRequest;
 import com.fixia.services.dto.ServiceRequestResponse;
 import com.fixia.services.service.ApplicantService;
 import com.fixia.services.service.ServiceRequestService;
@@ -13,6 +14,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -80,6 +82,25 @@ public class ServiceRequestController {
     public ServiceRequestResponse selectProvider(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
                                                  @PathVariable UUID applicationId) {
         return ServiceRequestResponse.from(service.selectProvider(clientId(jwt), id, applicationId));
+    }
+
+    /**
+     * El cliente corrige la dirección exacta de una solicitud propia (GC-514), solo antes de contratar. La respuesta
+     * sigue sin incluir la dirección (se entrega desde la contratación); el cambio se confirma con el 200.
+     */
+    @PatchMapping("/{id}/exact-location")
+    public ServiceRequestResponse changeExactLocation(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id,
+                                                      @Valid @RequestBody ExactLocationRequest body) {
+        return ServiceRequestResponse.from(service.changeExactLocation(clientId(jwt), id, body));
+    }
+
+    /**
+     * El cliente cancela una solicitud propia antes de contratar (GC-515): desde {@code PUBLISHED} o
+     * {@code PROVIDER_SELECTED}. Repetirla devuelve el estado actual; contratada o en un estado terminal, 409.
+     */
+    @PostMapping("/{id}/cancellation")
+    public ServiceRequestResponse cancel(@AuthenticationPrincipal Jwt jwt, @PathVariable UUID id) {
+        return ServiceRequestResponse.from(service.cancel(clientId(jwt), id));
     }
 
     /**

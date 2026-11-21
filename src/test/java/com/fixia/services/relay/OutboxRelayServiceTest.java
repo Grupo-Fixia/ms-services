@@ -82,8 +82,9 @@ class OutboxRelayServiceTest {
     @Test
     void publicaEventoExitosamenteYMarcaPublishedConFechaYMetricas() {
         OutboxEvent event = createEvent(1);
-        when(repository.findPendingForRelay(any(Instant.class), eq(10)))
-                .thenReturn(List.of(event));
+        when(repository.findPendingForRelay(any(Instant.class), anyInt()))
+                .thenReturn(List.of(event))
+                .thenReturn(Collections.emptyList());
         when(publisher.publish(event))
                 .thenReturn(CompletableFuture.completedFuture(null));
 
@@ -94,6 +95,54 @@ class OutboxRelayServiceTest {
         assertThat(event.getPublishedAt()).isNotNull();
         assertThat(event.getLastError()).isNull();
         verify(repository).save(event);
+    }
+
+    @Test
+    void publicaEnUnaSolaRondaTodaLaSecuenciaPendienteDeUnaSolicitudEnOrden() {
+        // GC-505: la consulta entrega una secuencia por solicitud; las pasadas siguientes toman las demás.
+        OutboxEvent first = createEvent(1);
+        OutboxEvent second = createEvent(2);
+        OutboxEvent third = createEvent(3);
+        when(repository.findPendingForRelay(any(Instant.class), anyInt()))
+                .thenReturn(List.of(first))
+                .thenReturn(List.of(second))
+                .thenReturn(List.of(third))
+                .thenReturn(Collections.emptyList());
+        when(publisher.publish(any(OutboxEvent.class))).thenReturn(CompletableFuture.completedFuture(null));
+
+        int processed = relayService.processBatch(10);
+
+        assertThat(processed).isEqualTo(3);
+        assertThat(first.getStatus()).isEqualTo(OutboxStatus.PUBLISHED);
+        assertThat(second.getStatus()).isEqualTo(OutboxStatus.PUBLISHED);
+        assertThat(third.getStatus()).isEqualTo(OutboxStatus.PUBLISHED);
+        org.mockito.InOrder order = org.mockito.Mockito.inOrder(publisher, repository);
+        order.verify(publisher).publish(first);
+        order.verify(repository).flush();
+        order.verify(publisher).publish(second);
+        order.verify(repository).flush();
+        order.verify(publisher).publish(third);
+    }
+
+    @Test
+    void noSuperaElTamanoDelLoteAunqueQuedenPendientes() {
+        when(repository.findPendingForRelay(any(Instant.class), eq(2)))
+                .thenReturn(List.of(createEvent(1), createEvent(2)));
+        when(publisher.publish(any(OutboxEvent.class))).thenReturn(CompletableFuture.completedFuture(null));
+
+        assertThat(relayService.processBatch(2)).isEqualTo(2);
+        verify(repository, org.mockito.Mockito.times(1)).findPendingForRelay(any(Instant.class), anyInt());
+    }
+
+    @Test
+    void siUnaPasadaNoPublicaNadaNoInsisteEnLaMismaRonda() {
+        OutboxEvent event = createEvent(1);
+        when(repository.findPendingForRelay(any(Instant.class), anyInt())).thenReturn(List.of(event));
+        when(publisher.publish(event)).thenReturn(CompletableFuture.failedFuture(new RuntimeException("broker caído")));
+
+        assertThat(relayService.processBatch(10)).isEqualTo(1);
+        verify(repository, org.mockito.Mockito.times(1)).findPendingForRelay(any(Instant.class), anyInt());
+        verify(repository, org.mockito.Mockito.never()).flush();
     }
 
     @Test

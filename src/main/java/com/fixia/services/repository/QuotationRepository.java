@@ -41,6 +41,15 @@ public interface QuotationRepository extends JpaRepository<Quotation, UUID> {
     /** Una cotización del prestador; vacío si no existe o es de otro prestador. */
     Optional<Quotation> findByIdAndProviderId(UUID id, UUID providerId);
 
+    /** Cotizaciones que envió el técnico (GC-551), como independiente o como designado de una empresa. */
+    List<Quotation> findByAuthorIdOrderByCreatedAtDescIdDesc(UUID authorId);
+
+    /** Las cotizaciones que envió el técnico en una solicitud, la versión más reciente primero (GC-551). */
+    List<Quotation> findByAuthorIdAndServiceRequestIdOrderByRevisionDesc(UUID authorId, UUID serviceRequestId);
+
+    /** Una cotización que envió el técnico; si la envió otro, no se encuentra (GC-551). */
+    Optional<Quotation> findByIdAndAuthorId(UUID id, UUID authorId);
+
     /** Una cotización solo se responde dentro de su solicitud: una de otra solicitud no se encuentra. */
     Optional<Quotation> findByIdAndServiceRequestId(UUID id, UUID serviceRequestId);
 }
