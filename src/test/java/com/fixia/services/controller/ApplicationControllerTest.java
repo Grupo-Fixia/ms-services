@@ -193,6 +193,21 @@ class ApplicationControllerTest {
     }
 
     @Test
+    void unTecnicoDeUnaEmpresaNoSePostulaPorSuCuenta() throws Exception {
+        ServiceRequest request = publishedRequest();
+        when(eligibilityClient.check(any(), any())).thenReturn(
+                new TechnicianEligibilityClient.Result(request.getId(), true, List.of(), true));
+
+        apply(TECHNICIAN, request.getId())
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.title").value("Perteneces a una empresa"))
+                .andExpect(jsonPath("$.detail").value("Perteneces a una empresa: te postulas a través de ella"))
+                .andExpect(jsonPath("$.reasons", contains("COMPANY_MEMBER")));
+
+        assertThat(applicationRepository.count()).isZero();
+    }
+
+    @Test
     void siNoSePuedeVerificarLaElegibilidadNoSePostula() throws Exception {
         ServiceRequest request = publishedRequest();
         when(eligibilityClient.check(any(), any())).thenThrow(new EligibilityCheckException("ms-users caído"));

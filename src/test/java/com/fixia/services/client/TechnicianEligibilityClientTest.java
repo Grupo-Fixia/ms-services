@@ -78,7 +78,21 @@ class TechnicianEligibilityClientTest {
 
         assertThat(result.eligible()).isFalse();
         assertThat(result.reasons()).containsExactly("ZONE", "AVAILABILITY");
+        assertThat(result.isCompanyMember()).isFalse();
         server.verify();
+    }
+
+    @Test
+    void leeSiElTecnicoPerteneceAUnaEmpresa() {
+        UUID id = UUID.randomUUID();
+        server.expect(requestTo(URL))
+                .andRespond(withSuccess("{\"results\":[{\"requestId\":\"" + id + "\",\"eligible\":true,"
+                        + "\"reasons\":[],\"companyMember\":true}]}", MediaType.APPLICATION_JSON));
+
+        TechnicianEligibilityClient.Result result = client.check(TECHNICIAN, request(id));
+
+        assertThat(result.eligible()).isTrue();
+        assertThat(result.isCompanyMember()).isTrue();
     }
 
     @Test
