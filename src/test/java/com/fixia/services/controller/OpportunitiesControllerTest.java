@@ -155,6 +155,27 @@ class OpportunitiesControllerTest {
     }
 
     @Test
+    void unTecnicoDeUnaEmpresaNoVeOportunidadesPropias() throws Exception {
+        Instant now = Instant.now();
+        published(ServiceCategory.PLUMBING, "Bogotá", now.minusSeconds(60));
+        published(ServiceCategory.PLUMBING, "Bogotá", now.minusSeconds(30));
+        when(eligibilityClient.checkAll(any(), any())).thenAnswer(call -> {
+            List<ServiceRequest> asked = call.getArgument(1);
+            Map<UUID, TechnicianEligibilityClient.Result> results = new HashMap<>();
+            for (ServiceRequest candidate : asked) {
+                results.put(candidate.getId(),
+                        new TechnicianEligibilityClient.Result(candidate.getId(), true, List.of(), true));
+            }
+            return results;
+        });
+
+        page("")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items", hasSize(0)))
+                .andExpect(jsonPath("$.nextCursor").value(nullValue()));
+    }
+
+    @Test
     void devuelveSoloLasElegiblesLaMasRecientePrimeroEnUnObjetoConItemsYCursorNulo() throws Exception {
         Instant now = Instant.now();
         ServiceRequest older = published(ServiceCategory.PLUMBING, "Bogotá", now.minusSeconds(120));

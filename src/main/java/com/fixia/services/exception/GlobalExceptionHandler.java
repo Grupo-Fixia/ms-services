@@ -114,6 +114,15 @@ public class GlobalExceptionHandler {
         return problem;
     }
 
+    /** 409: el técnico pertenece a una empresa y se postula a través de ella (contrato de empresas, D9). */
+    @ExceptionHandler(CompanyMemberApplicationException.class)
+    public ProblemDetail handleCompanyMember(CompanyMemberApplicationException ex) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, ex.getMessage());
+        problem.setTitle("Perteneces a una empresa");
+        problem.setProperty("reasons", ex.getReasons());
+        return problem;
+    }
+
     /** Falla cerrado: sin respuesta de ms-users no se registra la postulación. */
     @ExceptionHandler(EligibilityCheckException.class)
     public ProblemDetail handleEligibilityUnavailable(EligibilityCheckException ex) {
