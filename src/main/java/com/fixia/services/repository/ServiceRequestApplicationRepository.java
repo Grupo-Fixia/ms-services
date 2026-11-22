@@ -1,5 +1,6 @@
 package com.fixia.services.repository;
 
+import com.fixia.services.domain.ProviderType;
 import com.fixia.services.domain.ServiceRequestApplication;
 import org.springframework.data.jpa.repository.JpaRepository;
 
@@ -23,4 +24,8 @@ public interface ServiceRequestApplicationRepository extends JpaRepository<Servi
      * desempata las que comparten instante, para que el orden sea el mismo en cada consulta.
      */
     List<ServiceRequestApplication> findByServiceRequestIdOrderByCreatedAtAscIdAsc(UUID serviceRequestId);
+
+    /** Postulaciones de una empresa con ese técnico como propuesto (GC-524: su trabajo antes de desvincularse). */
+    List<ServiceRequestApplication> findByProviderIdAndTechnicianIdAndProviderTypeOrderByCreatedAtAscIdAsc(
+            UUID providerId, UUID technicianId, ProviderType providerType);
 }

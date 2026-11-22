@@ -1291,6 +1291,43 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
 
+  /internal/services/company-executors/workload:
+    post:
+      summary: Trabajo de un técnico con su empresa (GC-524, interna)
+      description: |
+        Para ms-users, antes de desvincular a un técnico de su empresa (contrato de empresas §6.1). Solo con
+        `X-Internal-Api-Key`; Traefik y el Ingress no la exponen. Pendiente = postulación `APPLIED` con la solicitud
+        `PUBLISHED`, o `SELECTED` con la solicitud seleccionada, contratada, en curso o terminada por el técnico.
+        `serviceRequestIds` = todas las solicitudes en que fue el seleccionado, incluidas las cerradas.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [companyAdminUserId, technicianUserId]
+              properties:
+                companyAdminUserId: { type: string, format: uuid, description: 'La empresa como prestador (su cuenta administradora).' }
+                technicianUserId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Trabajo del técnico con la empresa.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pendingServiceRequestIds:
+                    type: array
+                    items: { type: string, format: uuid }
+                  serviceRequestIds:
+                    type: array
+                    items: { type: string, format: uuid }
+        '400':
+          description: Falta un id o está mal formado.
+        '401':
+          description: Sin la clave interna o con una clave distinta.
+
   /internal/services/{serviceRequestId}/participation:
     get:
       summary: Participación y cierre de una solicitud (GC-444, interna)
