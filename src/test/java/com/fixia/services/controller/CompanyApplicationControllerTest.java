@@ -203,6 +203,15 @@ class CompanyApplicationControllerTest {
     }
 
     @Test
+    void laEmpresaProponeASuTecnicoAunqueMsUsersInformeQuePerteneceAElla() throws Exception {
+        ServiceRequest request = publishedRequest();
+        when(eligibilityClient.check(eq(CARLOS), any())).thenReturn(
+                new TechnicianEligibilityClient.Result(request.getId(), true, List.of(), true));
+
+        applyAsCompany(COMPANY, request.getId(), CARLOS, 180000).andExpect(status().isCreated());
+    }
+
+    @Test
     void elIndependienteSigueIgualYSuEventoLoIdentificaComoTal() throws Exception {
         ServiceRequest request = publishedRequest();
 

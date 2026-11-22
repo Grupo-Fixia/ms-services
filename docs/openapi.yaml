@@ -389,6 +389,8 @@ paths:
           description: |
             La solicitud ya no recibe postulaciones (no está publicada o su fecha esperada pasó), o el técnico ya se
             postuló a ella (GC-343, título "Postulación duplicada" y `applicationId` con la postulación existente).
+            También si el técnico pertenece a una empresa y se postula por su cuenta: título "Perteneces a una
+            empresa", `reasons: [COMPANY_MEMBER]` (contrato de empresas, D9); se postula a través de su empresa.
           content:
             application/problem+json:
               schema:
@@ -458,7 +460,8 @@ paths:
       summary: Consultar mis oportunidades compatibles (GC-337, GC-338; empresas GC-468)
       description: |
         Una página de solicitudes abiertas (`PUBLISHED` y con el momento esperado por delante) que el técnico puede
-        atender y a las que aún no se ha postulado, la más reciente primero. La compatibilidad (categoría, zona de
+        atender y a las que aún no se ha postulado, la más reciente primero. Un técnico que pertenece a una empresa
+        recibe una página vacía y sin cursor (D9): esas oportunidades las ve su empresa. La compatibilidad (categoría, zona de
         atención y disponibilidad) la decide ms-users, con la misma regla que se aplica al postularse.
 
         Paginación por cursor: se pide la siguiente página con el `nextCursor` de la anterior, hasta que sea `null`.

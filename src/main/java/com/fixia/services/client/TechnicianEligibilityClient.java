@@ -37,8 +37,21 @@ public class TechnicianEligibilityClient {
     record EligibilityQuery(List<RequestData> requests) {
     }
 
-    /** Resultado por solicitud. {@code reasons} son códigos estables como {@code CATEGORY}, {@code ZONE}. */
-    public record Result(UUID requestId, Boolean eligible, List<String> reasons) {
+    /**
+     * Resultado por solicitud. {@code reasons} son códigos estables como {@code CATEGORY}, {@code ZONE}.
+     * {@code companyMember} dice si el técnico pertenece a una empresa (contrato de empresas, D9); no cambia
+     * {@code eligible}, porque la misma consulta sirve cuando su empresa lo propone. Nulo si ms-users aún no lo envía.
+     */
+    public record Result(UUID requestId, Boolean eligible, List<String> reasons, Boolean companyMember) {
+
+        public Result(UUID requestId, Boolean eligible, List<String> reasons) {
+            this(requestId, eligible, reasons, null);
+        }
+
+        /** El técnico está en una empresa: no se postula ni ve oportunidades por su cuenta. */
+        public boolean isCompanyMember() {
+            return Boolean.TRUE.equals(companyMember);
+        }
     }
 
     record EligibilityAnswer(List<Result> results) {
