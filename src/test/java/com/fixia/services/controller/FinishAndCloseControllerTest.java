@@ -351,6 +351,9 @@ class FinishAndCloseControllerTest {
         assertThat(envelope.at("/actor/userId").asText()).isEqualTo(CLIENT.toString());
         assertThat(envelope.at("/actor/role").asText()).isEqualTo("CLIENT");
         assertThat(envelope.at("/data/status").asText()).isEqualTo("CLOSED");
+        // GC-547: en un independiente el ejecutor es el mismo prestador.
+        assertThat(envelope.at("/data/executorId").asText()).isEqualTo(envelope.at("/data/providerId").asText());
+        assertThat(envelope.at("/data/providerType").asText()).isEqualTo("INDEPENDENT");
         List<ServiceRequestTransition> timeline = timeline(service.requestId());
         assertThat(timeline.get(timeline.size() - 1).getOccurredAt())
                 .isEqualTo(Instant.parse(envelope.at("/data/closedAt").asText()));

@@ -149,3 +149,101 @@ producto (búsqueda geográfica real o simulada).
 - **ADR nuevo «Participación por eventos»** cuando se implemente la fase 1.
 - **SDD y DD:** diagrama de dependencias entre servicios. Hoy hay un ciclo `ms-users ⇄ ms-services`; después de la
   fase 1 queda en un solo sentido.
+
+## 8. Primera implementación (2026-11-22, reemplazada por §9)
+
+Se implementaron las fases 1 a 3 tal como se propusieron, con la revocación por eventos solo como respaldo y la
+pertenencia a empresas con una foto inicial por L6. Quitaba el ciclo y la caída en cadena, pero dejaba llamadas
+síncronas (L2, L3, L4, L5 al aceptar, la desvinculación de GC-524 y la búsqueda de ms-matching-geo). El PO pidió llegar
+a **cero dependencias síncronas**, así que esa versión se reemplazó por la de §9 en una sola rama por repositorio.
+
+## 9. Cero dependencias síncronas (2026-11-22)
+
+Rama `feature/GC-547-cero-dependencias` en `ms-users`, `ms-services`, `ms-payments` y `ms-matching-geo`. **Ningún
+servicio llama a otro por HTTP**: se comprobó buscando clientes HTTP y rutas `/internal/**` llamadas en los cuatro
+repositorios (no queda ninguna). Las rutas internas siguen expuestas, sin uso, para no romper versiones viejas durante el
+despliegue; se pueden quitar después.
+
+### 9.1 Cómo funciona: estado replicado
+
+Cada servicio dueño de un dato lo **publica completo** (no solo el cambio) en un tópico propio; quien lo necesita guarda
+una copia local y decide con ella.
+
+| Estado (`eventType`) | Tópico (clave) | Lo publica | Lo copia | Reemplaza a |
+| --- | --- | --- | --- | --- |
+| `tecnico.estado` | `fixia.users.technician-states` (técnico) | ms-users | ms-services, ms-matching-geo | L2 elegibilidad, L3 perfiles, L5/L6 pertenencia, búsqueda de matching |
+| `empresa.estado` | `fixia.users.company-states` (cuenta de la empresa) | ms-users | ms-services | L4 perfiles de empresa, empresa activa |
+| `servicio.participacion` | `fixia.services.participations` (solicitud) | ms-services | ms-users | L7 participación |
+| `ejecutor.carga` | `fixia.services.executor-workloads` (técnico) | ms-services | ms-users | trabajo pendiente al desvincularse (GC-524) |
+| `pago.retencion` | `fixia.payments.held-services` (solicitud) | ms-payments | ms-users | `/internal/payments/held` (GC-524) |
+| `sesion.revocada` | `fixia.users.sessions` (`jti`) | ms-users (Outbox, al cerrar sesión) | ms-services, ms-payments, ms-matching-geo | L1 revocación |
+
+- **Publicador** (`replication.StatePublisher` en Java, `HeldServicesStatePublisher` en .NET): cada 3 s calcula el
+  estado de cada entidad, lo compara con el hash de lo último publicado y escribe en el Outbox **solo lo que cambió**;
+  cada 6 h lo vuelve a publicar todo, para que un consumidor nuevo lo encuentre pese a la retención de 24 h de QA. El
+  primer arranque publica todo: eso reemplaza a la "foto" por REST y cubre los datos del seed, que nunca emitieron
+  eventos. La secuencia es el instante en milisegundos; una entidad que desaparece se publica con `removed=true`.
+- **Consumidor** (`replication.StateEventsListener` + `replicated_states` en Java; réplica en memoria en
+  ms-matching-geo): guarda la versión de mayor secuencia de cada clave; una repetida o atrasada no cambia nada.
+- **Reglas portadas:** ms-services evalúa la elegibilidad con las reglas de ms-users (categoría, ciudad sin tildes ni
+  mayúsculas, círculo, franja en hora de Colombia). La de verificación (RN-001) la resuelve ms-users y viaja ya decidida
+  en `verificationRequirementMet`. Si una regla cambia en ms-users, hay que cambiarla en `UserReplica` (ms-services) y en
+  `replication.py` (ms-matching-geo).
+- **Sin datos sensibles:** los estados no llevan correo, teléfono, documento ni NIT (lo comprueban las pruebas). El de
+  técnicos sí lleva el círculo de la zona, como la ruta interna de búsqueda; solo viaja por tópicos internos y nunca se
+  devuelve a un cliente.
+
+### 9.2 Revocación sin ms-users
+
+La lista local de `jti` revocados es la **única** fuente. Un token revocado sirve en los demás servicios el tiempo que
+tarda `sesion.revocada` en llegar: en la prueba de punta a punta fue **0,57 s** (Outbox de ms-users cada 0,5 s). Con el
+Outbox por defecto (2 s) la ventana es de unos 2 a 3 s; se acorta con `FIXIA_OUTBOX_RELAY_DELAY_MS`. Si la lista no está
+al día (el consumidor no confirmó con el broker en los últimos 5 s, `FIXIA_REVOCATIONS_MAX_STALENESS`), **se responde
+401**: falla cerrado, ahora atado a Kafka y no a ms-users.
+
+Defecto encontrado y corregido en la prueba real: en ms-services, el contenedor de Spring Kafka solo avisa la inactividad
+al volver de `poll()`, que esperaba hasta 5 s; la lista se confirmaba cada ~5 s y vencía. Ahora el `poll()` espera
+`idle-interval/2` y se confirma cada ~1 s.
+
+### 9.3 Consistencia eventual aceptada y compensación
+
+Las copias van unos segundos atrás. Lo más delicado es la empresa: un técnico podría desvincularse (ms-users mira su
+copia del trabajo) mientras el cliente acepta una cotización suya (ms-services mira su copia de la pertenencia). Al llegar
+el estado del técnico sin la empresa, `CompanyDepartureCompensation` **vence sus cotizaciones enviadas** en nombre de esa
+empresa y **registra como conflicto** cualquier contratación activa con él como ejecutor, para que el administrador la
+resuelva (reembolso o reasignación).
+
+Otros efectos de unos segundos: un técnico que cambia zona o franjas puede verse con las anteriores; un servicio recién
+cerrado puede no ser evaluable aún (422); tras desplegar, hasta que la réplica cargue, la búsqueda de ms-matching-geo
+responde 502 y la elegibilidad dice `TECHNICIAN_NOT_FOUND`.
+
+### 9.4 Evidencia
+
+- **Suites completas en verde:** ms-users y ms-services (`mvn clean verify`, con cobertura), ms-payments (221, más una
+  prueba contra Kafka real) y ms-matching-geo (105).
+- **Prueba de punta a punta** (ms-users y ms-services de la rama, Kafka local, bases temporales que se borraron al final):
+  registro de técnico y cliente; el estado del técnico llegó a ms-services en 3 s; ms-services encontró al técnico
+  compatible sin llamar a nadie; la participación llegó a ms-users en 1 s; tras el cierre de sesión ms-services rechazó el
+  token en 0,57 s; **con ms-users apagado, ms-services siguió autenticando y respondiendo con su réplica (200)** y siguió
+  rechazando el token revocado.
+
+### 9.5 Despliegue (para el DevOps)
+
+1. Crear los tópicos `fixia.users.technician-states`, `fixia.users.company-states`, `fixia.users.sessions`,
+   `fixia.services.participations`, `fixia.services.executor-workloads` y `fixia.payments.held-services`. De preferencia
+   con `cleanup.policy=compact` (los cinco de estado); si no, basta la republicación cada 6 h.
+2. Orden sugerido: ms-users, ms-payments, ms-services y ms-matching-geo. Las rutas internas siguen vivas mientras tanto.
+3. ms-matching-geo necesita `confluent-kafka==2.6.1` y `KAFKA_BOOTSTRAP_SERVERS` o `KAFKA_HOST`. ms-services deja de usar
+   `USERS_BASE_URL` y `MATCHING_BASE_URL`; ms-payments, `USERS_BASE_URL`.
+4. Migraciones nuevas: `V14__state_replication` (ms-users) y `V19__state_replication` (ms-services). ms-payments no
+   tiene migración: guarda los hashes en memoria.
+5. Lakehouse: copiar `servicio.cerrado.v1` (dos campos opcionales) y el sobre de ms-users (roles `COMPANY` y `ADMIN`,
+   agregado `Session`). Los tópicos de estado no son hechos de negocio: no hace falta suscribirlo.
+
+### 9.6 ADR propuesto (para GC-453)
+
+**ADR-0xx — Cero dependencias síncronas entre microservicios (GC-547).** *Contexto:* §1; el PO pidió que ningún servicio
+dependa de otro en línea. *Decisión:* estado replicado por Kafka (tabla de §9.1) y revocación por lista local que falla
+cerrada si no está al día. *Consecuencias:* la caída de un servicio no afecta a los demás; consistencia eventual de
+segundos con compensación para empresas; reglas de elegibilidad duplicadas en ms-services y ms-matching-geo (se reemplaza
+ADR-041); ADR-039 pasa a "falla cerrado si la lista no está al día"; más tópicos que operar.
