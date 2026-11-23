@@ -1,30 +1,53 @@
 package com.fixia.services.config;
 
-import com.fixia.services.client.TokenRevocationCheckException;
-import com.fixia.services.client.TokenRevocationClient;
+import com.fixia.services.revocation.RevocationList;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jwt.Jwt;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.when;
 
+/**
+ * Revocación sin consultar a ms-users (GC-547): decide la lista local de revocados, y solo si está al día (≤ 5 s); si
+ * no, el token se rechaza (falla cerrado).
+ */
 class TokenRevocationValidatorTest {
 
     private static final Instant NOW = Instant.parse("2026-10-15T12:00:00Z");
 
-    private final TokenRevocationClient client = mock(TokenRevocationClient.class);
-    private final TokenRevocationValidator validator =
-            new TokenRevocationValidator(client, Clock.fixed(NOW, ZoneOffset.UTC));
+    /** Reloj que la prueba puede adelantar. */
+    private static final class MovableClock extends Clock {
+        private Instant now = NOW;
+
+        void advance(Duration duration) {
+            now = now.plus(duration);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
+        }
+    }
+
+    private final MovableClock clock = new MovableClock();
+    private final RevocationList list = new RevocationList(clock, Duration.ofSeconds(5));
+    private final TokenRevocationValidator validator = new TokenRevocationValidator(list, clock);
 
     private static Jwt jwt(String jti, Instant expiresAt) {
         Jwt.Builder builder = Jwt.withTokenValue("token")
@@ -45,76 +68,75 @@ class TokenRevocationValidatorTest {
     }
 
     @Test
-    void unTokenNoRevocadoSeAcepta() {
-        when(client.isRevoked("jti-1")).thenReturn(false);
+    void conLaListaAlDiaUnTokenNoRevocadoSeAcepta() {
+        list.markCaughtUp();
 
-        OAuth2TokenValidatorResult result = validator.validate(jwt("jti-1", NOW.plusSeconds(600)));
-
-        assertThat(result.hasErrors()).isFalse();
-        verify(client).isRevoked("jti-1");
+        assertThat(validator.validate(jwt("jti-1", NOW.plusSeconds(600))).hasErrors()).isFalse();
     }
 
     @Test
-    void unTokenRevocadoSeRechaza() {
-        when(client.isRevoked("jti-1")).thenReturn(true);
+    void unTokenQueLaListaConoceComoRevocadoSeRechaza() {
+        list.markCaughtUp();
+        list.add("jti-1", NOW.plusSeconds(600));
 
-        OAuth2TokenValidatorResult result = validator.validate(jwt("jti-1", NOW.plusSeconds(600)));
-
-        assertThat(result.hasErrors()).isTrue();
-        assertThat(errorOf(result)).isEqualTo("Token revocado");
+        assertThat(errorOf(validator.validate(jwt("jti-1", NOW.plusSeconds(600))))).isEqualTo("Token revocado");
     }
 
     @Test
-    void siMsUsersNoRespondeSeRechazaElTokenFailClosed() {
-        when(client.isRevoked(anyString())).thenThrow(new TokenRevocationCheckException("caído"));
-
+    void sinConfirmacionDelConsumidorSeFallaCerrado() {
         OAuth2TokenValidatorResult result = validator.validate(jwt("jti-1", NOW.plusSeconds(600)));
 
-        assertThat(result.hasErrors()).isTrue();
         assertThat(errorOf(result)).contains("No se pudo verificar");
     }
 
     @Test
-    void cualquierErrorInesperadoTambienRechazaElToken() {
-        when(client.isRevoked(anyString())).thenThrow(new IllegalStateException("inesperado"));
+    void siLaListaSeAtrasaMasDeCincoSegundosSeFallaCerrado() {
+        list.markCaughtUp();
+        clock.advance(Duration.ofSeconds(5));
+        assertThat(validator.validate(jwt("jti-1", NOW.plusSeconds(600))).hasErrors()).isFalse();
 
-        assertThat(validator.validate(jwt("jti-1", NOW.plusSeconds(600))).hasErrors()).isTrue();
+        clock.advance(Duration.ofSeconds(1));
+
+        assertThat(errorOf(validator.validate(jwt("jti-1", NOW.plusSeconds(600))))).contains("No se pudo verificar");
     }
 
     @Test
-    void unTokenSinJtiSeRechazaSinConsultarAMsUsers() {
-        OAuth2TokenValidatorResult result = validator.validate(jwt(null, NOW.plusSeconds(600)));
+    void unRevocadoSeRechazaAunqueLaListaEsteAtrasada() {
+        list.add("jti-1", NOW.plusSeconds(600));
 
-        assertThat(result.hasErrors()).isTrue();
-        verifyNoInteractions(client);
+        assertThat(errorOf(validator.validate(jwt("jti-1", NOW.plusSeconds(600))))).isEqualTo("Token revocado");
     }
 
     @Test
-    void unTokenVencidoMasAllaDeLaToleranciaSeRechazaSinConsultarAMsUsers() {
-        OAuth2TokenValidatorResult result = validator.validate(jwt("jti-1", NOW.minusSeconds(60)));
+    void laListaOlvidaLosTokensVencidos() {
+        list.add("jti-1", NOW.plusSeconds(10));
+        list.add("jti-viejo", NOW.minusSeconds(1));
+        assertThat(list.contains("jti-viejo")).isFalse();
 
-        assertThat(result.hasErrors()).isTrue();
-        assertThat(errorOf(result)).isEqualTo("Token expirado");
-        verifyNoInteractions(client);
+        clock.advance(Duration.ofSeconds(11));
+
+        assertThat(list.contains("jti-1")).isFalse();
     }
 
     @Test
-    void unTokenRecienVencidoDentroDeLaToleranciaSiSeConsultaParaNoAceptarUnRevocado() {
-        when(client.isRevoked("jti-1")).thenReturn(true);
+    void unTokenSinJtiSeRechaza() {
+        list.markCaughtUp();
 
-        OAuth2TokenValidatorResult result = validator.validate(jwt("jti-1", NOW.minusSeconds(2)));
-
-        assertThat(result.hasErrors()).isTrue();
-        assertThat(errorOf(result)).isEqualTo("Token revocado");
-        verify(client).isRevoked("jti-1");
+        assertThat(validator.validate(jwt(null, NOW.plusSeconds(600))).hasErrors()).isTrue();
     }
 
     @Test
-    void unTokenSinExpiracionSeConsultaDeTodosModos() {
-        when(client.isRevoked("jti-1")).thenReturn(false);
+    void unTokenVencidoMasAllaDeLaToleranciaSeRechaza() {
+        list.markCaughtUp();
 
-        assertThat(validator.validate(jwt("jti-1", null)).hasErrors()).isFalse();
-        verify(client).isRevoked("jti-1");
-        verify(client, never()).isRevoked("otro");
+        assertThat(errorOf(validator.validate(jwt("jti-1", NOW.minusSeconds(60))))).isEqualTo("Token expirado");
+    }
+
+    @Test
+    void unTokenRecienVencidoDentroDeLaToleranciaSeRevisaEnLaLista() {
+        list.markCaughtUp();
+        list.add("jti-1", NOW.plusSeconds(60));
+
+        assertThat(errorOf(validator.validate(jwt("jti-1", NOW.minusSeconds(2))))).isEqualTo("Token revocado");
     }
 }
