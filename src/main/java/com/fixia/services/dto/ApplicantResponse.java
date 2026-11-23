@@ -65,8 +65,8 @@ public record ApplicantResponse(
      * Para un independiente, {@code provider} es su perfil y no hay {@code executor}. Para una empresa (GC-468),
      * {@code provider} es la empresa y {@code executor} el técnico que propone: dos identidades distintas (RF-026).
      *
-     * @param executorProfile perfil del técnico que haría el trabajo ({@code null} si ms-users no lo reconoce)
-     * @param companyProfile  perfil de la empresa, solo si se postuló una ({@code null} si no o si ms-users no la
+     * @param executorProfile perfil del técnico que haría el trabajo ({@code null} si la réplica de ms-users no lo tiene)
+     * @param companyProfile  perfil de la empresa, solo si se postuló una ({@code null} si no o si la réplica de ms-users no la
      *                        reconoce)
      */
     public static ApplicantResponse from(ServiceRequestApplication application,

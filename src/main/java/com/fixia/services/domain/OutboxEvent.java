@@ -96,14 +96,20 @@ public class OutboxEvent implements Persistable<UUID> {
 
     private OutboxEvent(UUID eventId, String eventType, short schemaVersion, String aggregateType, UUID aggregateId,
                         long aggregateSequence, String payload, Instant occurredAt) {
+        this(eventId, eventType, schemaVersion, aggregateType, aggregateId, aggregateSequence, TOPIC,
+                aggregateId.toString(), payload, occurredAt);
+    }
+
+    private OutboxEvent(UUID eventId, String eventType, short schemaVersion, String aggregateType, UUID aggregateId,
+                        long aggregateSequence, String topic, String messageKey, String payload, Instant occurredAt) {
         this.eventId = eventId;
         this.eventType = eventType;
         this.schemaVersion = schemaVersion;
         this.aggregateType = aggregateType;
         this.aggregateId = aggregateId;
         this.aggregateSequence = aggregateSequence;
-        this.topic = TOPIC;
-        this.messageKey = aggregateId.toString();
+        this.topic = topic;
+        this.messageKey = messageKey;
         this.payload = payload;
         this.occurredAt = occurredAt;
         this.status = OutboxStatus.PENDING;
@@ -118,6 +124,22 @@ public class OutboxEvent implements Persistable<UUID> {
      * @throws IllegalArgumentException si falta un dato, la secuencia o la versión no son positivas o el sobre no
      *                                  cabe en la columna
      */
+    /**
+     * Un mensaje para otro tópico, por ejemplo un estado replicado (GC-547), con su propia clave. Mismas reglas que
+     * {@link #pending(UUID, String, short, String, UUID, long, String, Instant)}.
+     */
+    public static OutboxEvent pending(UUID eventId, String eventType, short schemaVersion, String aggregateType,
+                                      UUID aggregateId, long aggregateSequence, String topic, String messageKey,
+                                      String payload, Instant occurredAt) {
+        require(topic != null && !topic.isBlank(), "El tópico es obligatorio");
+        require(messageKey != null && !messageKey.isBlank(), "La clave del mensaje es obligatoria");
+        OutboxEvent checked = pending(eventId, eventType, schemaVersion, aggregateType, aggregateId,
+                aggregateSequence, payload, occurredAt);
+        return new OutboxEvent(checked.eventId, checked.eventType, checked.schemaVersion, checked.aggregateType,
+                checked.aggregateId, checked.aggregateSequence, topic, messageKey, checked.payload,
+                checked.occurredAt);
+    }
+
     public static OutboxEvent pending(UUID eventId, String eventType, short schemaVersion, String aggregateType,
                                       UUID aggregateId, long aggregateSequence, String payload, Instant occurredAt) {
         require(eventId != null, "El id del evento es obligatorio");

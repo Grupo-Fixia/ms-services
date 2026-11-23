@@ -1,6 +1,6 @@
 package com.fixia.services.config;
 
-import com.fixia.services.client.TokenRevocationClient;
+import com.fixia.services.revocation.RevocationList;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.oauth2.core.OAuth2Error;
@@ -12,11 +12,13 @@ import org.springframework.stereotype.Component;
 import java.time.Clock;
 
 /**
- * Rechaza los access tokens cerrados con logout en ms-users. {@link JwtConfig} lo suma a la validación del
- * decoder, de modo que el token deja de servir de inmediato, sin esperar a su expiración.
+ * Rechaza los access tokens cerrados con logout en ms-users. {@link JwtConfig} lo suma a la validación del decoder.
  *
- * <p>Falla cerrado: si no se puede comprobar la revocación (ms-users caído, lento o con error) el token se
- * rechaza, porque aceptarlo haría valer un token revocado mientras dure la caída.
+ * <p>Desde GC-547 (cero dependencias síncronas) no se pregunta a ms-users: decide la lista local de revocados que
+ * alimenta {@code sesion.revocada}. Un token revocado puede servir aquí el tiempo que tarda el evento en llegar (el
+ * retraso del Outbox de ms-users, ~2 s, más Kafka); el PO aceptó una ventana corta. Falla cerrado: si la lista no está
+ * al día (el consumidor no confirmó con Kafka hace menos de {@code fixia.revocations.max-staleness}), el token se
+ * rechaza, porque no se puede saber si fue revocado.
  */
 @Component
 public class TokenRevocationValidator implements OAuth2TokenValidator<Jwt> {
@@ -28,11 +30,11 @@ public class TokenRevocationValidator implements OAuth2TokenValidator<Jwt> {
     private static final OAuth2Error UNVERIFIABLE =
             new OAuth2Error("invalid_token", "No se pudo verificar la revocación del token", null);
 
-    private final TokenRevocationClient revocationClient;
+    private final RevocationList revocationList;
     private final Clock clock;
 
-    public TokenRevocationValidator(TokenRevocationClient revocationClient, Clock clock) {
-        this.revocationClient = revocationClient;
+    public TokenRevocationValidator(RevocationList revocationList, Clock clock) {
+        this.revocationList = revocationList;
         this.clock = clock;
     }
 
@@ -42,20 +44,18 @@ public class TokenRevocationValidator implements OAuth2TokenValidator<Jwt> {
         if (jwt.getId() == null) {
             return OAuth2TokenValidatorResult.failure(REVOKED);
         }
-        // Un token vencido (más allá de la tolerancia de relojes) no vale de todos modos: se evita la llamada.
+        // Un token vencido (más allá de la tolerancia de relojes) no vale de todos modos.
         if (jwt.getExpiresAt() != null
                 && jwt.getExpiresAt().plus(JwtConfig.CLOCK_SKEW).isBefore(clock.instant())) {
             return OAuth2TokenValidatorResult.failure(EXPIRED);
         }
-        try {
-            return revocationClient.isRevoked(jwt.getId())
-                    ? OAuth2TokenValidatorResult.failure(REVOKED)
-                    : OAuth2TokenValidatorResult.success();
-        } catch (RuntimeException e) {
-            // Sin el jti ni detalles del token en el log.
-            log.warn("No se pudo comprobar la revocación de un token; se rechaza la petición ({})",
-                    e.getClass().getSimpleName());
+        if (revocationList.contains(jwt.getId())) {
+            return OAuth2TokenValidatorResult.failure(REVOKED);
+        }
+        if (!revocationList.isFresh()) {
+            log.warn("La lista local de revocados no está al día; se rechaza la petición");
             return OAuth2TokenValidatorResult.failure(UNVERIFIABLE);
         }
+        return OAuth2TokenValidatorResult.success();
     }
 }
