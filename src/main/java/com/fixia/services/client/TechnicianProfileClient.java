@@ -1,36 +1,28 @@
 package com.fixia.services.client;
 
-import com.fixia.services.config.UsersClientProperties;
 import com.fixia.services.domain.ServiceCategory;
-import org.springframework.beans.factory.annotation.Qualifier;
-import org.springframework.http.MediaType;
+import com.fixia.services.replication.UserReplica;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.RestClient;
-import org.springframework.web.client.RestClientException;
 
+import java.math.BigDecimal;
 import java.util.Collection;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
 /**
- * Pide a ms-users el perfil público de los prestadores postulados (GC-425). Los datos del técnico viven en la base de
- * ms-users (Database per Service); este servicio no los guarda ni los copia, solo los consulta para mostrárselos al
- * cliente. Ruta interna {@code POST /internal/technicians/public-profiles}, autenticada con la clave compartida.
- *
- * <p>Consulta por lotes de hasta {@value #MAX_PER_CALL} técnicos, el máximo de ms-users.
+ * Perfil público de los técnicos que se postularon (GC-425). Desde GC-547 se lee de la réplica local del estado que
+ * publica ms-users, sin llamarlo. Solo lo que el cliente necesita: nombre corto, verificación, especialidades,
+ * descripción, experiencia, ciudad y reputación; nunca el círculo de la zona.
  */
 @Component
 public class TechnicianProfileClient {
 
-    static final int MAX_PER_CALL = 100;
-
     /**
-     * Perfil público del técnico tal como lo entrega ms-users: nombre corto, verificación, especialidades,
-     * descripción, experiencia, ciudad y reputación (GC-446). Los campos que el técnico no ha llenado llegan en
-     * {@code null}; la reputación también, si todavía nadie lo ha evaluado.
+     * Perfil público del técnico. Los campos que el técnico no ha llenado llegan en {@code null}; la reputación también,
+     * si todavía nadie lo ha evaluado.
      */
     public record PublicProfile(UUID userId, String displayName, String verificationStatus,
                                 List<ServiceCategory> categories, String professionalDescription,
@@ -38,64 +30,35 @@ public class TechnicianProfileClient {
     }
 
     /**
-     * Reputación real que calcula ms-users (GC-446): promedio de 1 a 5 con un decimal y número de evaluaciones de
-     * clientes. ms-services no la calcula ni la guarda: solo la reenvía.
+     * Reputación que calcula ms-users (GC-446): promedio de 1 a 5 con un decimal y número de evaluaciones de clientes.
+     * ms-services no la calcula: la reenvía.
      */
-    public record Reputation(java.math.BigDecimal average, long count) {
+    public record Reputation(BigDecimal average, long count) {
     }
 
-    record ProfilesQuery(List<UUID> userIds) {
+    private final UserReplica replica;
+
+    public TechnicianProfileClient(UserReplica replica) {
+        this.replica = replica;
     }
 
-    record ProfilesAnswer(List<PublicProfile> profiles) {
-    }
-
-    private final RestClient restClient;
-    private final UsersClientProperties properties;
-
-    public TechnicianProfileClient(@Qualifier("usersRestClient") RestClient restClient,
-                                   UsersClientProperties properties) {
-        this.restClient = restClient;
-        this.properties = properties;
-    }
-
-    /**
-     * @return el perfil de cada técnico que ms-users conoce como técnico activo, indexado por su {@code users.id}.
-     *         Un técnico que no aparece (por ejemplo, con la cuenta deshabilitada) simplemente no está en el mapa.
-     * @throws ProfileLookupException si no se pudo obtener una respuesta válida de ms-users
-     */
+    /** @return el perfil de cada técnico activo, indexado por su id; los que la réplica no tiene simplemente no están */
     public Map<UUID, PublicProfile> findPublicProfiles(Collection<UUID> userIds) {
-        List<UUID> ids = List.copyOf(new LinkedHashSet<>(userIds));
-        Map<UUID, PublicProfile> byUser = new HashMap<>();
-        for (int from = 0; from < ids.size(); from += MAX_PER_CALL) {
-            List<UUID> batch = ids.subList(from, Math.min(from + MAX_PER_CALL, ids.size()));
-            for (PublicProfile profile : fetch(batch)) {
-                if (profile == null || profile.userId() == null) {
-                    throw new ProfileLookupException("ms-users respondió un perfil público incompleto");
-                }
-                byUser.put(profile.userId(), profile);
-            }
-        }
-        return byUser;
+        Map<UUID, PublicProfile> profiles = new LinkedHashMap<>();
+        replica.activeTechnicians(new LinkedHashSet<>(userIds)).forEach((id, technician) ->
+                profiles.put(id, profile(technician)));
+        return profiles;
     }
 
-    private List<PublicProfile> fetch(List<UUID> batch) {
-        ProfilesAnswer answer;
-        try {
-            answer = restClient.post()
-                    .uri("/internal/technicians/public-profiles")
-                    .header(TechnicianEligibilityClient.API_KEY_HEADER,
-                            properties.internalApiKey() == null ? "" : properties.internalApiKey())
-                    .contentType(MediaType.APPLICATION_JSON)
-                    .body(new ProfilesQuery(batch))
-                    .retrieve()
-                    .body(ProfilesAnswer.class);
-        } catch (RestClientException e) {
-            throw new ProfileLookupException("ms-users no pudo entregar el perfil de los técnicos", e);
-        }
-        if (answer == null || answer.profiles() == null) {
-            throw new ProfileLookupException("ms-users respondió sin perfiles");
-        }
-        return answer.profiles();
+    private static PublicProfile profile(UserReplica.Technician technician) {
+        List<ServiceCategory> categories = technician.categories() == null ? List.of()
+                : technician.categories().stream().map(ServiceCategory::valueOf).toList();
+        return new PublicProfile(technician.userId(), technician.displayName(), technician.verificationStatus(),
+                categories, technician.professionalDescription(), technician.yearsOfExperience(), technician.city(),
+                reputation(technician.reputation()));
+    }
+
+    static Reputation reputation(UserReplica.Reputation reputation) {
+        return reputation == null ? null : new Reputation(reputation.average(), reputation.count());
     }
 }

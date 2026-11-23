@@ -114,7 +114,6 @@ public class OpportunityService {
      * Oportunidades de la empresa que administra esta cuenta (GC-468). Sin técnicos activos no puede atender nada:
      * página vacía y sin cursor, sin revisar candidatas.
      *
-     * @throws com.fixia.services.client.EligibilityCheckException si ms-users no responde (falla cerrada)
      */
     public CompanyPage findCompanyPage(UUID companyAdminUserId, int limit, OpportunityCursor cursor) {
         List<UUID> technicians = companyClient.findTechnicians(companyAdminUserId);
