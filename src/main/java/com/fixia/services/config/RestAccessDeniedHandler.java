@@ -27,6 +27,7 @@ public class RestAccessDeniedHandler implements AccessDeniedHandler {
     @Override
     public void handle(HttpServletRequest request, HttpServletResponse response,
                        AccessDeniedException accessDeniedException) throws IOException {
+        RestAuthenticationEntryPoint.ensureBestMatchingPattern(request);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.FORBIDDEN, "Su rol no permite realizar esta acción");
         problem.setTitle("Acceso denegado");

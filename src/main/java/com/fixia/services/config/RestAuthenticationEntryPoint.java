@@ -10,10 +10,12 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.stereotype.Component;
+import org.springframework.web.servlet.HandlerMapping;
 
 import java.io.IOException;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.regex.Pattern;
 
 /**
  * Respuesta 401 única para ausencia de token y para token inválido (firma, expiración, emisor, revocado, o
@@ -23,15 +25,29 @@ import java.nio.charset.StandardCharsets;
 @Component
 public class RestAuthenticationEntryPoint implements AuthenticationEntryPoint {
 
+    private static final Pattern UUID_SEGMENT = Pattern.compile(
+            "(?<=/)[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}(?=/|$)");
+
     private final ObjectMapper objectMapper;
 
     public RestAuthenticationEntryPoint(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
     }
 
+    static void ensureBestMatchingPattern(HttpServletRequest request) {
+        if (request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE) == null) {
+            String rawUri = request.getRequestURI();
+            if (rawUri != null && !rawUri.isBlank()) {
+                String normalized = UUID_SEGMENT.matcher(rawUri).replaceAll("{id}");
+                request.setAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE, normalized);
+            }
+        }
+    }
+
     @Override
     public void commence(HttpServletRequest request, HttpServletResponse response,
                          AuthenticationException authException) throws IOException {
+        ensureBestMatchingPattern(request);
         ProblemDetail problem = ProblemDetail.forStatusAndDetail(
                 HttpStatus.UNAUTHORIZED, "Se requiere autenticación válida");
         problem.setTitle("No autenticado");
