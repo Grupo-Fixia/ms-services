@@ -23,11 +23,34 @@ import java.util.UUID;
 @Component
 public class CompanyClient {
 
+    static final int MAX_PER_CALL = 100;
+
+    record AssociationQuery(UUID companyAdminUserId, UUID technicianUserId) {
+    }
+
+    record AssociationAnswer(Boolean associated) {
+    }
+
+    record ProfilesQuery(List<UUID> companyAdminUserIds) {
+    }
+
     /**
      * Nombre comercial de la empresa; nunca su NIT ni los datos de la cuenta. {@code reputation} (GC-551) es el promedio
-     * simple de las reputaciones de sus técnicos asociados que ya tienen evaluaciones; {@code null} si ninguno tiene.
+     * simple de las reputaciones de sus técnicos asociados que ya tienen evaluaciones; {@code null} si ninguno tiene o
+     * si ms-users todavía no la envía.
      */
     public record CompanyProfile(UUID companyAdminUserId, String name, TechnicianProfileClient.Reputation reputation) {
+
+        public CompanyProfile(UUID companyAdminUserId, String name) {
+            this(companyAdminUserId, name, null);
+        }
+    }
+
+    record ProfilesAnswer(List<CompanyProfile> profiles) {
+    }
+
+    record TechniciansQuery(UUID companyAdminUserId) {
+    }
 
         public CompanyProfile(UUID companyAdminUserId, String name) {
             this(companyAdminUserId, name, null);

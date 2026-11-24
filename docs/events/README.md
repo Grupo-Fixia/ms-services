@@ -177,6 +177,7 @@ escribe el contenido del evento en los logs (solo `eventId`, `eventType` y la se
   `servicio.iniciado` y `servicio.finalizado` (GC-551: el técnico que ejecuta; en un servicio de empresa, `providerId`
   es la empresa y `executorId` su técnico designado), y `executorId` y `providerType` en `servicio.cerrado` (GC-547:
   quien lo consuma sabe a quién se evalúa). **El lakehouse debe copiar estos esquemas**: con su copia anterior
+  es la empresa y `executorId` su técnico designado). **El lakehouse debe copiar estos esquemas**: con su copia anterior
   (`additionalProperties: false`) mandaría esos eventos a `quarantine/`.
 - **Cambio incompatible, versión nueva:** quitar o renombrar un campo, cambiar su tipo o su significado, o volver
   obligatorio uno opcional. Se crea `<tipo>.v2.schema.json`, `ms-services` publica la versión nueva y el consumidor

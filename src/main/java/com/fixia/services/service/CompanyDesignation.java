@@ -51,6 +51,7 @@ public class CompanyDesignation {
      *                                      ({@value #NOT_DESIGNATED}), o si el designado ya no está en la empresa
      *                                      ({@value #LEFT_COMPANY}). A un técnico ajeno a la empresa no se le dice
      *                                      nada de la selección: sigue el 409 genérico de quien no fue seleccionado
+     * @throws com.fixia.services.client.EligibilityCheckException 503 si ms-users no responde
      */
     public UUID providerFor(ServiceRequest request, UUID technicianId) {
         Optional<ServiceRequestApplication> selected = selectedCompanyApplication(request);
@@ -69,7 +70,7 @@ public class CompanyDesignation {
         return companyId;
     }
 
-    /** 409 si el técnico ya no pertenece a la empresa (según la réplica de ms-users, GC-547). */
+    /** 409 si el técnico ya no pertenece a la empresa; 503 si ms-users no responde. */
     public void requireStillAssociated(UUID companyId, UUID technicianId) {
         if (!companyClient.isTechnicianAssociated(companyId, technicianId)) {
             throw new QuotationNotAllowedException(LEFT_COMPANY);
