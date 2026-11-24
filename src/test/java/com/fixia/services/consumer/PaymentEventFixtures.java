@@ -82,6 +82,23 @@ public final class PaymentEventFixtures {
         return event;
     }
 
+    /**
+     * {@code pago.reembolsado} con la forma real de ms-payments: trae el pago y la solicitud, pero no la contratación,
+     * el cliente ni el prestador.
+     */
+    public static ObjectNode refunded(ServiceContract contract, long sequence) {
+        ObjectNode event = envelope("pago.reembolsado", sequence, contract);
+        ObjectNode data = data(contract, "Refunded");
+        data.remove("contractId");
+        data.remove("clientId");
+        data.remove("providerId");
+        data.put("refundReference", "REFUND-1");
+        data.put("reason", "Objeción del cliente");
+        data.put("kind", "RELEASE");
+        event.set("data", data);
+        return event;
+    }
+
     public static UUID eventId(ObjectNode event) {
         return UUID.fromString(event.get("eventId").asText());
     }

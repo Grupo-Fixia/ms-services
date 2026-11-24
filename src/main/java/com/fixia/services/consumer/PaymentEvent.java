@@ -19,6 +19,8 @@ public record PaymentEvent(UUID eventId, String eventType, long sequence, JsonNo
 
     public static final String PROCESSED = "pago.procesado";
     public static final String FAILED = "pago.fallido";
+    public static final String COMPLETED = "pago.completado";
+    public static final String REFUNDED = "pago.reembolsado";
 
     /**
      * Lee el sobre tal como llega de Kafka.
@@ -58,6 +60,11 @@ public record PaymentEvent(UUID eventId, String eventType, long sequence, JsonNo
     /** ¿Es un hecho que decide si el servicio puede iniciar? Los demás de pagos no son asunto de ms-services. */
     public boolean decidesStart() {
         return PROCESSED.equals(eventType) || FAILED.equals(eventType);
+    }
+
+    /** ¿Es un hecho que dice cómo terminó el dinero retenido (cobro al cerrar o reembolso)? */
+    public boolean settles() {
+        return COMPLETED.equals(eventType) || REFUNDED.equals(eventType);
     }
 
     public UUID dataUuid(String field) {

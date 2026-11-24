@@ -143,13 +143,69 @@ class PaymentEventHandlerTest {
     }
 
     @Test
-    void losDemasHechosDePagoSeRegistranPeroNoDecidenElInicio() {
-        ObjectNode completed = PaymentEventFixtures.completed(contract, 3);
+    void pagoCreadoSoloSeRegistra() {
+        ObjectNode created = PaymentEventFixtures.completed(contract, 1);
+        created.put("eventType", "pago.creado");
 
-        assertThat(handle(completed)).isEqualTo(Outcome.NOT_RELEVANT);
+        assertThat(handle(created)).isEqualTo(Outcome.NOT_RELEVANT);
 
         assertThat(payments.count()).isZero();
-        assertThat(processedEvents.existsById(PaymentEventFixtures.eventId(completed))).isTrue();
+        assertThat(processedEvents.existsById(PaymentEventFixtures.eventId(created))).isTrue();
+    }
+
+    @Test
+    void alCobrarAlCerrarElPagoQuedaCompletado() {
+        handle(PaymentEventFixtures.processed(contract, 2));
+
+        assertThat(handle(PaymentEventFixtures.completed(contract, 3))).isEqualTo(Outcome.APPLIED);
+
+        assertThat(statusOfPayment()).isEqualTo(ContractPaymentStatus.COMPLETED);
+        assertThat(payments.findById(contract.getId()).orElseThrow().getLastSequence()).isEqualTo(3);
+    }
+
+    @Test
+    void elReembolsoSinContratacionNiParticipantesSeUbicaPorElPagoYQuedaReembolsado() {
+        handle(PaymentEventFixtures.processed(contract, 2));
+        ObjectNode refunded = PaymentEventFixtures.refunded(contract, 3);
+
+        assertThat(handle(refunded)).isEqualTo(Outcome.APPLIED);
+
+        ContractPayment payment = payments.findById(contract.getId()).orElseThrow();
+        assertThat(payment.getStatus()).isEqualTo(ContractPaymentStatus.REFUNDED);
+        assertThat(payment.getLastEventId()).isEqualTo(PaymentEventFixtures.eventId(refunded));
+    }
+
+    @Test
+    void unaRetencionTardiaNoDeshaceUnReembolso() {
+        handle(PaymentEventFixtures.processed(contract, 2));
+        handle(PaymentEventFixtures.refunded(contract, 4));
+
+        assertThat(handle(PaymentEventFixtures.processed(contract, 3))).isEqualTo(Outcome.STALE);
+
+        assertThat(statusOfPayment()).isEqualTo(ContractPaymentStatus.REFUNDED);
+    }
+
+    @Test
+    void unCobroOReembolsoDeUnPagoDesconocidoSeDescarta() {
+        ObjectNode completed = PaymentEventFixtures.completed(contract, 3);
+        ObjectNode refunded = PaymentEventFixtures.refunded(contract, 3);
+
+        assertThat(handle(completed)).isEqualTo(Outcome.REJECTED);
+        assertThat(handle(refunded)).isEqualTo(Outcome.REJECTED);
+
+        assertThat(payments.count()).isZero();
+        assertThat(processedEvents.existsById(PaymentEventFixtures.eventId(refunded))).isTrue();
+    }
+
+    @Test
+    void unReembolsoDeOtraSolicitudNoTocaElPago() {
+        handle(PaymentEventFixtures.processed(contract, 2));
+        ObjectNode refunded = PaymentEventFixtures.refunded(contract, 3);
+        ((ObjectNode) refunded.get("data")).put("serviceRequestId", UUID.randomUUID().toString());
+
+        assertThat(handle(refunded)).isEqualTo(Outcome.REJECTED);
+
+        assertThat(statusOfPayment()).isEqualTo(ContractPaymentStatus.HELD);
     }
 
     @Test
