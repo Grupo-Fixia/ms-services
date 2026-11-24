@@ -135,7 +135,7 @@ public final class BusinessEvents {
     }
 
     record ServiceClosed(UUID contractId, UUID serviceRequestId, UUID clientId, UUID providerId, Instant closedAt,
-                         ServiceRequestStatus status) {
+                         ServiceRequestStatus status, UUID executorId, ProviderType providerType) {
     }
 
     record EvidenceRegistered(UUID evidenceId, UUID serviceRequestId, UUID uploadedBy, String contentType,
@@ -233,10 +233,18 @@ public final class BusinessEvents {
                 contract.getClientId(), contract.getProviderId(), objectedAt, ServiceRequestStatus.IN_PROGRESS));
     }
 
-    /** El cliente confirmó el cierre (GC-441): {@code TECHNICIAN_FINISHED -> CLOSED}, definitivo. */
+    /**
+     * El cliente confirmó el cierre (GC-441): {@code TECHNICIAN_FINISHED -> CLOSED}, definitivo. Lleva el ejecutor y el
+     * tipo de prestador (GC-547), para que quien lo consuma sepa a quién se evalúa sin llamar a la ruta de
+     * participación: en una empresa, el prestador es la empresa y el ejecutor su técnico designado.
+     */
     public static Event serviceClosed(ServiceContract contract, Instant closedAt) {
+        UUID executorId = contract.getExecutorId();
+        ProviderType providerType = executorId == null || executorId.equals(contract.getProviderId())
+                ? ProviderType.INDEPENDENT : ProviderType.COMPANY;
         return new Event(SERVICE_CLOSED, V1, new ServiceClosed(contract.getId(), contract.getServiceRequestId(),
-                contract.getClientId(), contract.getProviderId(), closedAt, ServiceRequestStatus.CLOSED));
+                contract.getClientId(), contract.getProviderId(), closedAt, ServiceRequestStatus.CLOSED,
+                executorId, providerType));
     }
 
     /** El técnico subió una evidencia al servicio (GC-439). */

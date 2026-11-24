@@ -8,6 +8,7 @@ import com.fixia.services.domain.ServiceRequestApplication;
 import com.fixia.services.exception.ApplicationNotFoundException;
 import com.fixia.services.exception.DuplicateApplicationException;
 import com.fixia.services.exception.ServiceRequestNotFoundException;
+import com.fixia.services.exception.CompanyMemberApplicationException;
 import com.fixia.services.exception.TechnicianNotEligibleException;
 import com.fixia.services.repository.ServiceRequestApplicationRepository;
 import com.fixia.services.repository.ServiceRequestRepository;
@@ -106,6 +107,10 @@ public class ApplicationService {
         }
         TechnicianEligibilityClient.Result eligibility =
                 eligibilityClient.check(company ? technicianId : providerId, request);
+        // D9: un técnico de una empresa no se postula como independiente (sí puede proponerlo su empresa).
+        if (!company && eligibility.isCompanyMember()) {
+            throw new CompanyMemberApplicationException();
+        }
         if (!eligibility.eligible()) {
             throw new TechnicianNotEligibleException(eligibility.reasons());
         }

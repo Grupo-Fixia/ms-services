@@ -203,6 +203,14 @@ public class Quotation {
         transitionTo(QuotationStatus.EXPIRED, now);
     }
 
+    /**
+     * Vence una cotización enviada porque su autor ya no pertenece a la empresa en cuyo nombre cotizó (GC-547): sin
+     * ejecutor no se puede aceptar, aunque siga vigente.
+     */
+    public void expireBecauseAuthorLeft(Instant now) {
+        transitionTo(QuotationStatus.EXPIRED, now);
+    }
+
     /** La reemplaza una cotización más reciente del mismo prestador. */
     public void supersede(Instant now) {
         transitionTo(QuotationStatus.SUPERSEDED, now);

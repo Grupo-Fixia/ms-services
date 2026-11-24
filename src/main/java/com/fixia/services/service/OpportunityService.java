@@ -79,24 +79,41 @@ public class OpportunityService {
      * @param cursor posición de la que continuar, o {@code null} para empezar por las más recientes
      */
     public Page findPage(UUID providerId, int limit, OpportunityCursor cursor) {
-        Scan<ServiceRequest> scan = scan(providerId, limit, cursor, batch -> {
-            Map<UUID, TechnicianEligibilityClient.Result> results = eligibilityClient.checkAll(providerId, batch);
-            Map<UUID, ServiceRequest> offered = new LinkedHashMap<>();
-            for (ServiceRequest candidate : batch) {
-                if (isEligible(results.get(candidate.getId()))) {
-                    offered.put(candidate.getId(), candidate);
-                }
-            }
-            return offered;
-        });
+        Scan<ServiceRequest> scan;
+        try {
+            scan = scan(providerId, limit, cursor, batch -> offeredTo(providerId, batch));
+        } catch (CompanyMemberStop stop) {
+            // D9: un técnico de una empresa no ve oportunidades propias; las ve su empresa.
+            return new Page(List.of(), null);
+        }
         return new Page(scan.items(), scan.next());
+    }
+
+    /** Señal interna para cortar el recorrido en cuanto ms-users dice que el técnico pertenece a una empresa. */
+    private static final class CompanyMemberStop extends RuntimeException {
+        CompanyMemberStop() {
+            super(null, null, false, false);
+        }
+    }
+
+    private Map<UUID, ServiceRequest> offeredTo(UUID providerId, List<ServiceRequest> batch) {
+        Map<UUID, TechnicianEligibilityClient.Result> results = eligibilityClient.checkAll(providerId, batch);
+        if (results.values().stream().anyMatch(result -> result != null && result.isCompanyMember())) {
+            throw new CompanyMemberStop();
+        }
+        Map<UUID, ServiceRequest> offered = new LinkedHashMap<>();
+        for (ServiceRequest candidate : batch) {
+            if (isEligible(results.get(candidate.getId()))) {
+                offered.put(candidate.getId(), candidate);
+            }
+        }
+        return offered;
     }
 
     /**
      * Oportunidades de la empresa que administra esta cuenta (GC-468). Sin técnicos activos no puede atender nada:
      * página vacía y sin cursor, sin revisar candidatas.
      *
-     * @throws com.fixia.services.client.EligibilityCheckException si ms-users no responde (falla cerrada)
      */
     public CompanyPage findCompanyPage(UUID companyAdminUserId, int limit, OpportunityCursor cursor) {
         List<UUID> technicians = companyClient.findTechnicians(companyAdminUserId);

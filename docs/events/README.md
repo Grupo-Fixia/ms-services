@@ -87,7 +87,7 @@ aceptar una cotización ya aceptada con el contrato ya creado) no publica otro e
 | `servicio.iniciado` | `ContractService#start`, al pasar de `CONTRACTED` a `IN_PROGRESS` (RF-045, GC-437) | Técnico | Contrato, solicitud, cliente y prestador, momento del inicio y estado `IN_PROGRESS` |
 | `servicio.finalizado` | `ContractService#finish`, al pasar de `IN_PROGRESS` a `TECHNICIAN_FINISHED` (RF-047, GC-441) | Técnico | Contrato, solicitud, cliente y prestador, momento de la declaración y estado `TECHNICIAN_FINISHED`; sin `evidenceCount` hasta GC-439 |
 | `servicio.cierre_objetado` | `ContractService#objectClosure`, al pasar de `TECHNICIAN_FINISHED` a `IN_PROGRESS` (GC-441) | Cliente | Contrato, solicitud, cliente y prestador, momento de la objeción y estado `IN_PROGRESS`; **sin el motivo** |
-| `servicio.cerrado` | `ContractService#confirmClosure`, al pasar de `TECHNICIAN_FINISHED` a `CLOSED` (RF-048, GC-441) | Cliente | Contrato, solicitud, cliente y prestador, momento del cierre y estado `CLOSED` |
+| `servicio.cerrado` | `ContractService#confirmClosure`, al pasar de `TECHNICIAN_FINISHED` a `CLOSED` (RF-048, GC-441) | Cliente | Contrato, solicitud, cliente, prestador, ejecutor y tipo de prestador (GC-547), momento del cierre y estado `CLOSED`. ms-users lo consume para su proyección `closed_services` |
 
 `servicio.iniciado`, `servicio.finalizado`, `servicio.cierre_objetado` y `servicio.cerrado` se escriben en la misma
 transacción que el cambio de estado y su anotación en el historial que ven los usuarios; repetir una operación que ya se
@@ -175,6 +175,8 @@ escribe el contenido del evento en los logs (solo `eventId`, `eventType` y la se
   `COMPANY`) y `technicianId`; sigue siendo la versión 1. Ya hecho así: `budget` en `solicitud.publicada` (GC-421) y
   `revision` en `cotizacion.enviada` (GC-427), y `executorId` en `cotizacion.enviada`, `servicio.contratado`,
   `servicio.iniciado` y `servicio.finalizado` (GC-551: el técnico que ejecuta; en un servicio de empresa, `providerId`
+  es la empresa y `executorId` su técnico designado), y `executorId` y `providerType` en `servicio.cerrado` (GC-547:
+  quien lo consuma sabe a quién se evalúa). **El lakehouse debe copiar estos esquemas**: con su copia anterior
   es la empresa y `executorId` su técnico designado). **El lakehouse debe copiar estos esquemas**: con su copia anterior
   (`additionalProperties: false`) mandaría esos eventos a `quarantine/`.
 - **Cambio incompatible, versión nueva:** quitar o renombrar un campo, cambiar su tipo o su significado, o volver

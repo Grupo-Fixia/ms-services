@@ -389,6 +389,8 @@ paths:
           description: |
             La solicitud ya no recibe postulaciones (no está publicada o su fecha esperada pasó), o el técnico ya se
             postuló a ella (GC-343, título "Postulación duplicada" y `applicationId` con la postulación existente).
+            También si el técnico pertenece a una empresa y se postula por su cuenta: título "Perteneces a una
+            empresa", `reasons: [COMPANY_MEMBER]` (contrato de empresas, D9); se postula a través de su empresa.
           content:
             application/problem+json:
               schema:
@@ -458,7 +460,8 @@ paths:
       summary: Consultar mis oportunidades compatibles (GC-337, GC-338; empresas GC-468)
       description: |
         Una página de solicitudes abiertas (`PUBLISHED` y con el momento esperado por delante) que el técnico puede
-        atender y a las que aún no se ha postulado, la más reciente primero. La compatibilidad (categoría, zona de
+        atender y a las que aún no se ha postulado, la más reciente primero. Un técnico que pertenece a una empresa
+        recibe una página vacía y sin cursor (D9): esas oportunidades las ve su empresa. La compatibilidad (categoría, zona de
         atención y disponibilidad) la decide ms-users, con la misma regla que se aplica al postularse.
 
         Paginación por cursor: se pide la siguiente página con el `nextCursor` de la anterior, hasta que sea `null`.
@@ -1290,6 +1293,43 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+
+  /internal/services/company-executors/workload:
+    post:
+      summary: Trabajo de un técnico con su empresa (GC-524, interna)
+      description: |
+        Para ms-users, antes de desvincular a un técnico de su empresa (contrato de empresas §6.1). Solo con
+        `X-Internal-Api-Key`; Traefik y el Ingress no la exponen. Pendiente = postulación `APPLIED` con la solicitud
+        `PUBLISHED`, o `SELECTED` con la solicitud seleccionada, contratada, en curso o terminada por el técnico.
+        `serviceRequestIds` = todas las solicitudes en que fue el seleccionado, incluidas las cerradas.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [companyAdminUserId, technicianUserId]
+              properties:
+                companyAdminUserId: { type: string, format: uuid, description: 'La empresa como prestador (su cuenta administradora).' }
+                technicianUserId: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Trabajo del técnico con la empresa.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pendingServiceRequestIds:
+                    type: array
+                    items: { type: string, format: uuid }
+                  serviceRequestIds:
+                    type: array
+                    items: { type: string, format: uuid }
+        '400':
+          description: Falta un id o está mal formado.
+        '401':
+          description: Sin la clave interna o con una clave distinta.
 
   /internal/services/{serviceRequestId}/participation:
     get:

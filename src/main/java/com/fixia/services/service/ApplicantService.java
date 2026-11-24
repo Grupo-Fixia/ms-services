@@ -36,7 +36,6 @@ public class ApplicantService {
      * postulantes no se consulta a ms-users, y sin empresas postuladas no se piden perfiles de empresa. Un prestador
      * que ms-users ya no reconoce como técnico activo sale sin perfil ({@code null}) en lugar de uno inventado.
      *
-     * @throws com.fixia.services.client.ProfileLookupException si ms-users no entrega los perfiles (503)
      */
     public List<ApplicantView> list(UUID clientId, UUID requestId) {
         List<ServiceRequestApplication> applications = serviceRequestService.listApplicants(clientId, requestId);

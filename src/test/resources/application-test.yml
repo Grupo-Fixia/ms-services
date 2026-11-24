@@ -19,6 +19,18 @@ fixia:
   outbox:
     relay:
       enabled: false
+  replication:
+    # Las pruebas llaman al publicador y al manejador directamente.
+    publisher:
+      enabled: false
+    consumer:
+      enabled: false
+      topics: fixia.users.technician-states
+      group-id: ms-services-test
+  revocations:
+    consumer:
+      # Sin consumidor la lista nunca está al día: un token real se rechaza (las pruebas usan jwt() o simulan la lista).
+      enabled: false
   payments:
     consumer:
       # Las pruebas llaman al manejador directo; la prueba con broker en memoria lo enciende por su cuenta.

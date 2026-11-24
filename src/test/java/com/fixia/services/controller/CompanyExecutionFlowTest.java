@@ -92,6 +92,9 @@ class CompanyExecutionFlowTest {
     @Autowired
     private JdbcTemplate jdbc;
 
+    @Autowired
+    private com.fixia.services.replication.StatePublisher statePublisher;
+
     @MockBean
     private TechnicianEligibilityClient eligibilityClient;
 
@@ -251,15 +254,39 @@ class CompanyExecutionFlowTest {
                     .as(event.getEventType()).isEmpty();
         }
         for (String type : List.of("cotizacion.enviada", "servicio.contratado", "servicio.iniciado",
-                "servicio.finalizado")) {
+                "servicio.finalizado", "servicio.cerrado")) {
             JsonNode payload = objectMapper.readTree(events.stream().filter(e -> e.getEventType().equals(type))
                     .findFirst().orElseThrow().getPayload());
             assertThat(payload.at("/data/providerId").asText()).as(type).isEqualTo(company.toString());
             assertThat(payload.at("/data/executorId").asText()).as(type).isEqualTo(carlos.toString());
         }
+        // GC-547: el ejecutor y el tipo de prestador también viajan en servicio.cerrado.
+        JsonNode closed = objectMapper.readTree(events.stream()
+                .filter(e -> e.getEventType().equals("servicio.cerrado")).findFirst().orElseThrow().getPayload());
+        assertThat(closed.at("/data/providerType").asText()).isEqualTo("COMPANY");
         JsonNode started = objectMapper.readTree(events.stream()
                 .filter(e -> e.getEventType().equals("servicio.iniciado")).findFirst().orElseThrow().getPayload());
         assertThat(started.at("/actor/userId").asText()).isEqualTo(carlos.toString());
+
+        // GC-547: lo que ms-users ya no pregunta por REST le llega como estado replicado.
+        statePublisher.publishChanges();
+        JsonNode participation = objectMapper.readTree(outboxRepository.findAll().stream()
+                .filter(e -> e.getEventType().equals("servicio.participacion") && e.getAggregateId().equals(requestId))
+                .findFirst().orElseThrow().getPayload());
+        assertThat(participation.at("/data/status").asText()).isEqualTo("CLOSED");
+        assertThat(participation.at("/data/providerType").asText()).isEqualTo("COMPANY");
+        assertThat(participation.at("/data/executorId").asText()).isEqualTo(carlos.toString());
+        assertThat(outboxRepository.findAll().stream()
+                .filter(e -> e.getEventType().equals("servicio.participacion")).findFirst().orElseThrow().getTopic())
+                .isEqualTo("fixia.services.participations");
+        JsonNode workload = objectMapper.readTree(outboxRepository.findAll().stream()
+                .filter(e -> e.getEventType().equals("ejecutor.carga") && e.getAggregateId().equals(carlos))
+                .findFirst().orElseThrow().getPayload());
+        assertThat(workload.at("/data/companies/0/companyAdminUserId").asText()).isEqualTo(company.toString());
+        assertThat(workload.at("/data/companies/0/pendingServiceRequestIds")).isEmpty();
+        assertThat(workload.at("/data/companies/0/serviceRequestIds/0").asText()).isEqualTo(requestId.toString());
+        // Una segunda pasada sin cambios no publica nada.
+        assertThat(statePublisher.publishChanges()).isZero();
     }
 
     // ---------- Quién puede cotizar ----------

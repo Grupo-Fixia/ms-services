@@ -1,7 +1,6 @@
 package com.fixia.services.config;
 
-import com.fixia.services.client.TokenRevocationCheckException;
-import com.fixia.services.client.TokenRevocationClient;
+import com.fixia.services.revocation.RevocationList;
 import com.nimbusds.jose.jwk.JWKSet;
 import com.nimbusds.jose.jwk.RSAKey;
 import com.nimbusds.jose.jwk.source.ImmutableJWKSet;
@@ -43,8 +42,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * Recorrido completo de una petición autenticada: decoder real (firma RS256 con la clave pública configurada)
- * más la consulta de revocación a ms-users, que aquí se sustituye por un doble. Comprueba que la revocación
- * y la caída de ms-users cierran el acceso (fail-closed).
+ * más la lista local de revocados (GC-547), que aquí se sustituye por un doble. Comprueba que un token revocado y una
+ * lista que no está al día cierran el acceso (fail-closed), sin consultar a ms-users.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -66,63 +65,64 @@ class RevocationPipelineTest {
     private MockMvc mockMvc;
 
     @MockBean
-    private TokenRevocationClient revocationClient;
+    private RevocationList revocationList;
 
     @Test
     void unTokenVigenteYNoRevocadoPasaYSeConsultaSuJti() throws Exception {
         String jti = UUID.randomUUID().toString();
-        when(revocationClient.isRevoked(jti)).thenReturn(false);
+        when(revocationList.isFresh()).thenReturn(true);
 
         list(token(TRUSTED, "ROLE_CLIENT", jti, Instant.now().plusSeconds(600)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray());
 
-        verify(revocationClient).isRevoked(jti);
+        verify(revocationList).contains(jti);
     }
 
     @Test
     void unTokenRevocadoPorLogoutSeRechazaConElMismo401() throws Exception {
-        when(revocationClient.isRevoked(anyString())).thenReturn(true);
+        when(revocationList.isFresh()).thenReturn(true);
+        when(revocationList.contains(anyString())).thenReturn(true);
 
         expectUnauthorized(list(token(TRUSTED, "ROLE_CLIENT", UUID.randomUUID().toString(),
                 Instant.now().plusSeconds(600))));
     }
 
     @Test
-    void siMsUsersNoRespondeLaPeticionSeRechazaFailClosed() throws Exception {
-        when(revocationClient.isRevoked(anyString())).thenThrow(new TokenRevocationCheckException("caído"));
+    void siLaListaNoEstaAlDiaLaPeticionSeRechazaFailClosed() throws Exception {
+        when(revocationList.isFresh()).thenReturn(false);
 
         expectUnauthorized(list(token(TRUSTED, "ROLE_CLIENT", UUID.randomUUID().toString(),
                 Instant.now().plusSeconds(600))));
     }
 
     @Test
-    void unTokenVencidoSeRechazaSinConsultarAMsUsers() throws Exception {
+    void unTokenVencidoSeRechazaSinConsultarLaLista() throws Exception {
         Instant past = Instant.now().minusSeconds(600);
 
         expectUnauthorized(list(token(TRUSTED, "ROLE_CLIENT", UUID.randomUUID().toString(), past)));
 
-        verifyNoInteractions(revocationClient);
+        verifyNoInteractions(revocationList);
     }
 
     @Test
-    void unTokenFirmadoPorOtraClaveSeRechazaSinConsultarAMsUsers() throws Exception {
+    void unTokenFirmadoPorOtraClaveSeRechazaSinConsultarLaLista() throws Exception {
         expectUnauthorized(list(token(newKeyPair(), "ROLE_CLIENT", UUID.randomUUID().toString(),
                 Instant.now().plusSeconds(600))));
 
-        verifyNoInteractions(revocationClient);
+        verifyNoInteractions(revocationList);
     }
 
     @Test
-    void sinTokenNoSeConsultaAMsUsers() throws Exception {
+    void sinTokenNoSeConsultaLaLista() throws Exception {
         expectUnauthorized(mockMvc.perform(get(LIST)));
 
-        verifyNoInteractions(revocationClient);
+        verifyNoInteractions(revocationList);
     }
 
     @Test
     void unTecnicoConTokenValidoRecibe403() throws Exception {
-        when(revocationClient.isRevoked(anyString())).thenReturn(false);
+        when(revocationList.isFresh()).thenReturn(true);
 
         list(token(TRUSTED, "ROLE_PROFESSIONAL", UUID.randomUUID().toString(), Instant.now().plusSeconds(600)))
                 .andExpect(status().isForbidden())
@@ -130,10 +130,10 @@ class RevocationPipelineTest {
     }
 
     @Test
-    void elHealthCheckNoExigeTokenNiConsultaAMsUsers() throws Exception {
+    void elHealthCheckNoExigeTokenNiConsultaLaLista() throws Exception {
         mockMvc.perform(get("/actuator/health")).andExpect(status().isOk());
 
-        verifyNoInteractions(revocationClient);
+        verifyNoInteractions(revocationList);
     }
 
     // ---------- Utilidades ----------

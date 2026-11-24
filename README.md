@@ -74,6 +74,19 @@ Es la primera ruta `/internal/**` de este servicio: tiene su propia cadena de se
 mayor prioridad que la de usuarios, que solo acepta la cabecera `X-Internal-Api-Key` con la misma `INTERNAL_API_KEY`
 con la que este servicio llama a ms-users. Un token de usuario no sirve ahí. Traefik y el Ingress no la exponen.
 
+## Ruta interna de trabajo del técnico de una empresa (GC-524)
+
+`POST /internal/services/company-executors/workload` con `{companyAdminUserId, technicianUserId}` responde
+`{pendingServiceRequestIds, serviceRequestIds}`. La usa ms-users antes de dejar que un técnico se desvincule de su
+empresa (contrato de empresas §6.1). Solo mira las postulaciones de esa empresa en las que el técnico es el propuesto:
+
+- **Pendiente**: postulación `APPLIED` con la solicitud aún `PUBLISHED`, o `SELECTED` con la solicitud en
+  `PROVIDER_SELECTED`, `CONTRACTED`, `IN_PROGRESS` o `TECHNICIAN_FINISHED`.
+- **Todas** (`serviceRequestIds`): las solicitudes en que fue el seleccionado, en cualquier estado; ms-users las usa para
+  preguntar a ms-payments por dinero retenido.
+
+Misma clave interna; 400 si falta un id o está mal formado. No se cachea.
+
 ## API (GC-333)
 
 Contrato completo en [`docs/openapi.yaml`](docs/openapi.yaml).

@@ -51,6 +51,17 @@
         },
         "status": {
           "const": "CLOSED"
+        },
+        "executorId": {
+          "description": "Técnico que ejecutó el servicio (GC-547). Coincide con providerId en un independiente; en una empresa es su técnico designado. Opcional en v1.",
+          "$ref": "https://fixia.local/schemas/events/common.v1.schema.json#/$defs/uuid"
+        },
+        "providerType": {
+          "description": "Tipo de prestador contratado (GC-547): INDEPENDENT o COMPANY. Opcional en v1.",
+          "enum": [
+            "INDEPENDENT",
+            "COMPANY"
+          ]
         }
       }
     }
