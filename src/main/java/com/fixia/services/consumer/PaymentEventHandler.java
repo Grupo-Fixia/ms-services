@@ -25,8 +25,10 @@ import java.util.UUID;
  * <p>Reglas, en este orden y todas en una sola transacción con el registro del evento como procesado:
  * <ol>
  *   <li>Un {@code eventId} ya visto no hace nada: Kafka entrega al menos una vez.
- *   <li>Los demás hechos de pagos ({@code pago.creado}, {@code pago.completado}, {@code pago.reembolsado}) no deciden el
- *       inicio y solo se registran.
+ *   <li>{@code pago.creado} no decide nada y solo se registra.
+ *   <li>{@code pago.completado} y {@code pago.reembolsado} dicen cómo terminó el dinero retenido: dejan el pago
+ *       {@code COMPLETED} o {@code REFUNDED}. No traen la contratación (el reembolso tampoco trae cliente ni prestador), así
+ *       que se ubican por el {@code paymentId} que dejó la retención; si no se conoce ese pago, se descartan.
  *   <li>El hecho debe cuadrar con la contratación (solicitud, cliente, prestador y, para la retención, valor y moneda).
  *       Si no existe o no cuadra no se autoriza nada: se registra el error y se descarta, porque reintentarlo no lo arregla.
  *   <li>Un hecho con secuencia menor o igual a la última aplicada llegó tarde: se ignora, así un {@code pago.fallido}
@@ -76,7 +78,9 @@ public class PaymentEventHandler {
             return Outcome.DUPLICATE;
         }
         Instant now = clock.instant();
-        Outcome outcome = event.decidesStart() ? apply(event, now) : Outcome.NOT_RELEVANT;
+        Outcome outcome = event.decidesStart() ? apply(event, now)
+                : event.settles() ? settle(event, now)
+                : Outcome.NOT_RELEVANT;
         processedEvents.save(new ProcessedEvent(event.eventId(), event.eventType(), now));
         return outcome;
     }
@@ -104,6 +108,31 @@ public class PaymentEventHandler {
             payments.save(ContractPayment.first(contractId, found.get().getServiceRequestId(), paymentId, status,
                     event.eventId(), event.sequence(), now));
         }
+        return Outcome.APPLIED;
+    }
+
+    /**
+     * Cobro al cerrar o reembolso del administrador sobre un pago ya conocido. Sin la retención previa no hay nada que
+     * reflejar: se registra el error y se descarta.
+     */
+    private Outcome settle(PaymentEvent event, Instant now) {
+        UUID paymentId = event.dataUuid("paymentId");
+        UUID serviceRequestId = event.dataUuid("serviceRequestId");
+        Optional<ContractPayment> found = payments.findByPaymentId(paymentId);
+        if (found.isEmpty() || !found.get().getServiceRequestId().equals(serviceRequestId)) {
+            log.error("Se descarta {} {}: no se conoce el pago {} o no es de la solicitud {}",
+                    event.eventType(), event.eventId(), paymentId, serviceRequestId);
+            return Outcome.REJECTED;
+        }
+        ContractPayment payment = found.get();
+        if (!payment.isNewer(event.sequence())) {
+            log.warn("Se ignora {} {}: llegó después de un hecho más nuevo del mismo pago",
+                    event.eventType(), event.eventId());
+            return Outcome.STALE;
+        }
+        ContractPaymentStatus status = PaymentEvent.COMPLETED.equals(event.eventType())
+                ? ContractPaymentStatus.COMPLETED : ContractPaymentStatus.REFUNDED;
+        payment.apply(paymentId, status, event.eventId(), event.sequence(), now);
         return Outcome.APPLIED;
     }
 
