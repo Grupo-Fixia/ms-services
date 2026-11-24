@@ -20,6 +20,12 @@ public class PaymentNotRetainedException extends RuntimeException {
             return "El servicio no puede iniciar: no se pudo retener el pago del cliente, por ejemplo por saldo "
                     + "insuficiente. Cuando el cliente recargue su billetera y el pago se retenga, podrás iniciarlo";
         }
+        if (status == ContractPaymentStatus.REFUNDED) {
+            return "El servicio no puede iniciar: el administrador reembolsó el pago al cliente";
+        }
+        if (status == ContractPaymentStatus.COMPLETED) {
+            return "El servicio no puede iniciar: su pago ya se cobró";
+        }
         return "El servicio no puede iniciar todavía: el pago del cliente aún no está retenido. "
                 + "Intenta de nuevo cuando se confirme";
     }

@@ -79,14 +79,15 @@ public class ContractPayment {
     }
 
     /**
-     * Aplica un hecho más nuevo: de {@code FAILED} a {@code HELD} cuando el cliente recarga y reintenta, o a la inversa.
+     * Aplica un hecho más nuevo: de {@code FAILED} a {@code HELD} cuando el cliente recarga y reintenta, o a la inversa;
+     * y desde {@code HELD} a {@code COMPLETED} (cobro al cerrar) o {@code REFUNDED} (reembolso del administrador).
      *
      * @throws IllegalArgumentException si el hecho no es más nuevo que el último aplicado
      */
     public void apply(UUID paymentId, ContractPaymentStatus status, UUID eventId, long sequence, Instant now) {
         require(isNewer(sequence), "El hecho no es más nuevo que el último aplicado");
-        require(status == ContractPaymentStatus.HELD || status == ContractPaymentStatus.FAILED,
-                "Solo se guarda un pago retenido o fallido");
+        require(status != null && status != ContractPaymentStatus.PENDING,
+                "Un pago pendiente no se guarda: es la ausencia de fila");
         require(paymentId != null && eventId != null && now != null, "Faltan datos del pago de la contratación");
         this.paymentId = paymentId;
         this.status = status;
