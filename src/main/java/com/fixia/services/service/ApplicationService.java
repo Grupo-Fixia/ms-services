@@ -154,7 +154,7 @@ public class ApplicationService {
     /** Postulaciones del técnico con la solicitud de cada una, la más reciente primero. */
     @Transactional(readOnly = true)
     public List<ApplicationView> listMine(UUID providerId) {
-        List<ServiceRequestApplication> applications = applicationRepository.findByProviderIdOrderByCreatedAtDesc(providerId);
+        List<ServiceRequestApplication> applications = applicationRepository.findVisibleToTechnician(providerId);
         Map<UUID, ServiceRequest> requests = serviceRequestRepository
                 .findAllById(applications.stream().map(ServiceRequestApplication::getServiceRequestId).toList())
                 .stream().collect(Collectors.toMap(ServiceRequest::getId, Function.identity()));
@@ -166,7 +166,7 @@ public class ApplicationService {
     /** Una postulación del técnico. Si no existe o es de otro técnico, la respuesta es la misma (404). */
     @Transactional(readOnly = true)
     public ApplicationView getMine(UUID providerId, UUID applicationId) {
-        ServiceRequestApplication application = applicationRepository.findByIdAndProviderId(applicationId, providerId)
+        ServiceRequestApplication application = applicationRepository.findVisibleToTechnician(applicationId, providerId)
                 .orElseThrow(ApplicationNotFoundException::new);
         return new ApplicationView(application,
                 serviceRequestRepository.findById(application.getServiceRequestId()).orElse(null));

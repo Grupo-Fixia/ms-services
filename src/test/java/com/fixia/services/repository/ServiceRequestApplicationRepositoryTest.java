@@ -104,6 +104,28 @@ class ServiceRequestApplicationRepositoryTest {
     }
 
     @Test
+    void elTecnicoVeLasSuyasYLasDeSuEmpresaQueLoDesignanPeroNoLasDeOtros() {
+        ServiceRequest own = publishedRequest();
+        ServiceRequest designated = publishedRequest();
+        ServiceRequest foreign = publishedRequest();
+        Instant base = now();
+        UUID company = UUID.randomUUID();
+        ServiceRequestApplication mine = apply(own, PROVIDER, base.minusSeconds(60));
+        ServiceRequestApplication byCompany = applicationRepository.saveAndFlush(
+                ServiceRequestApplication.submitForCompany(designated, company, PROVIDER, PRICE, CurrencyCode.COP,
+                        base));
+        ServiceRequestApplication otherDesignation = applicationRepository.saveAndFlush(
+                ServiceRequestApplication.submitForCompany(foreign, company, UUID.randomUUID(), PRICE,
+                        CurrencyCode.COP, base.minusSeconds(30)));
+
+        assertThat(applicationRepository.findVisibleToTechnician(PROVIDER))
+                .extracting(ServiceRequestApplication::getId).containsExactly(byCompany.getId(), mine.getId());
+        assertThat(applicationRepository.findVisibleToTechnician(byCompany.getId(), PROVIDER)).isPresent();
+        assertThat(applicationRepository.findVisibleToTechnician(mine.getId(), PROVIDER)).isPresent();
+        assertThat(applicationRepository.findVisibleToTechnician(otherDesignation.getId(), PROVIDER)).isEmpty();
+    }
+
+    @Test
     void guardaElPrecioPropuestoConDosDecimalesYSuMoneda() {
         ServiceRequestApplication saved = applicationRepository.saveAndFlush(ServiceRequestApplication.submit(
                 publishedRequest(), PROVIDER, new BigDecimal("98500.5"), CurrencyCode.COP, now()));
